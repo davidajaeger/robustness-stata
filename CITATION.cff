@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "This software implements the method of Jaeger (2026). If you use it, please cite the paper below."
+title: "robustness: Range Tests for Equality and Equivalence Across Specifications"
+authors:
+  - family-names: Jaeger
+    given-names: David A.
+    affiliation: University of St Andrews
+type: software
+license: MIT
+repository-code: "https://github.com/davidajaeger/robustness"
+preferred-citation:
+  type: article
+  title: "Robustness? Range Tests for Equality and Equivalence Across Specifications"
+  authors:
+    - family-names: Jaeger
+      given-names: David A.
+  year: 2026
+  notes: "Working paper."

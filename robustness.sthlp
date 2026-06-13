@@ -1,0 +1,205 @@
+{smcl}
+{* *! version 1.0.0  Jaeger (2026)}{...}
+{viewerjumpto "Syntax" "robustness##syntax"}{...}
+{viewerjumpto "Description" "robustness##description"}{...}
+{viewerjumpto "Options" "robustness##options"}{...}
+{viewerjumpto "Input files" "robustness##inputs"}{...}
+{viewerjumpto "Output" "robustness##output"}{...}
+{viewerjumpto "Remarks" "robustness##remarks"}{...}
+{viewerjumpto "Examples" "robustness##examples"}{...}
+{viewerjumpto "Stored results" "robustness##results"}{...}
+{viewerjumpto "References" "robustness##references"}{...}
+{title:Title}
+
+{phang}
+{bf:robustness} {hline 2} Range tests for equality and equivalence across
+specifications, from saved bootstrap draws
+
+{marker syntax}{...}
+{title:Syntax}
+
+{p 8 17 2}
+{cmd:robustness}
+{cmd:using} {it:drawsfile}{cmd:,}
+{opth m:eta(filename)}
+{opth c:omps(filename)}
+[{opth a:lpha(numlist)}
+{opt maxd:rop(#)}]
+
+{synoptset 20 tabbed}{...}
+{synopthdr}
+{synoptline}
+{syntab:Required}
+{synopt :{opth m:eta(filename)}}metadata file with full-sample estimates{p_end}
+{synopt :{opth c:omps(filename)}}comparisons file defining the spec groups{p_end}
+
+{syntab:Optional}
+{synopt :{opth a:lpha(numlist)}}significance levels for equivalence margins.
+Default {cmd:alpha(0.50 0.05)}, matching Panel B in the paper. Additional
+alphas are computed for the last comparison and stored in {cmd:r()} but are
+not added to Panel B{p_end}
+{synopt :{opt maxd:rop(#)}}maximum percent of incomplete replications before
+aborting. Default {cmd:maxdrop(1)}{p_end}
+{synoptline}
+
+{marker description}{...}
+{title:Description}
+
+{pstd}
+{cmd:robustness} computes the range-test statistics in Jaeger (2026) from
+bootstrap draws saved by an application's generation step. Output is two
+panels matching the paper's reporting convention:
+
+{phang}
+{bf:Panel A: Specification-level estimates.} One row per specification, with
+columns for the full-sample point estimate, standard error, full-sample n,
+and bootstrap-average n.
+
+{phang}
+{bf:Panel B: Comparison-set statistics.} One row per comparison, with columns
+for K, mean point estimate, observed range, delta*(.50), delta*(.05),
+bootstrap p-value p_R, and the robustness ratio delta*(.05)/|theta_bar|.
+
+{pstd}
+Equivalence bounds are computed at alpha = .50 and .05, matching Panel B in
+Jaeger (2026). The Wald statistic, its bootstrap p-value, and the
+Wald-based equivalence bound are computed and available in {cmd:r()} but are
+not printed.
+
+{pstd}
+The command reads all of its inputs from disk. It preserves the data in
+memory and restores it on exit, so it can be run at any point in a session
+without disturbing the user's data.
+
+{marker options}{...}
+{title:Options}
+
+{phang}
+{opth meta(filename)} names the metadata file. Required. See {help robustness##inputs:Input files}.
+
+{phang}
+{opth comps(filename)} names the comparisons file. Required.
+
+{phang}
+{opth alpha(numlist)} sets the significance levels for the equivalence
+margins. Each value must be strictly between 0 and 1. The default is
+{cmd:alpha(0.50 0.05)}, matching Panel B in Jaeger (2026): the median bound
+delta*(.50) (a point estimate of Delta) and the 95th-percentile upper bound
+delta*(.05). Panel B always reports these two columns. If the user supplies
+additional alphas, those are computed for every comparison and returned in
+the matrix {cmd:r(extra)}, with columns {cmd:delta_R_a}{it:XX} and
+{cmd:delta_W_a}{it:XX} for each extra alpha (where {it:XX} is the two-digit
+alpha; for example, alpha=0.10 -> a10). The additional bounds are not added
+to Panel B's printed output.
+
+{phang}
+{opt maxdrop(#)} sets the maximum percentage of bootstrap replications that
+may be incomplete before the command aborts. A replication is incomplete if
+any coefficient draw in the comparison is non-finite, typically because a
+specification failed to converge on that resample. Incomplete replications
+are dropped and counted. If the dropped share exceeds {opt maxdrop()} the
+command stops, because the surviving draws may no longer represent the
+intended distribution. The default is {cmd:1}.
+
+{marker inputs}{...}
+{title:Input files}
+
+{pstd}
+{bf:Draws file} ({cmd:using}). One observation per bootstrap replication.
+Variables {cmd:rep}, {cmd:coef1} {cmd:se1} {cmd:coef2} {cmd:se2} ... , one
+coef/se pair per specification in column order. Optional {cmd:n1} {cmd:n2}
+... carry per-spec bootstrap sample sizes; if present for every spec, the
+command reports the bootstrap-average n per spec in Panel A. The coefficient
+draws must be raw, that is uncentred. All recentring happens inside the
+command.
+
+{pstd}
+{bf:Metadata file} ({opt meta()}). One observation per specification, in
+column order. Variables {cmd:k}, {cmd:label}, {cmd:theta}, {cmd:se}, where
+{cmd:theta} is the full-sample point estimate. Optional {cmd:n} carries the
+full-sample sample size, shown in Panel A if present.
+
+{pstd}
+{bf:Comparisons file} ({opt comps()}). One observation per comparison.
+Variables {cmd:comp_name} and {cmd:comp_cols}, where {cmd:comp_cols} is a
+space-separated list of 1-indexed column numbers. A comparison needs at
+least two specifications, and every column number must be an integer in the
+range 1 to K.
+
+{marker output}{...}
+{title:Output}
+
+{pstd}
+Panel B's robustness ratio delta*(.05)/|theta_bar| is the heuristic ratio
+defined in Jaeger (2026), Section 4. When |theta_bar| is close to zero,
+interpret it with caution: the ratio can be large even when delta*(.05) is
+economically small. In such cases, judge the bound directly in coefficient
+units rather than as a ratio.
+
+{pstd}
+A note is printed below Panel B if any comparison has bootstrap-average
+sample sizes that differ across its specifications. The per-spec n values
+appear in Panel A.
+
+{marker remarks}{...}
+{title:Remarks}
+
+{pstd}
+The single requirement the command cannot verify is that the same resampled
+units were used for all specifications on each replication. Resampling
+independently per specification destroys the joint distribution across
+specifications and produces wrong p_R and delta* with no error and no
+warning. The guarantee must be enforced in the generation step. The
+generation examples accompanying Jaeger (2026) enforce and teach it.
+
+{marker examples}{...}
+{title:Examples}
+
+{pstd}Run all comparisons at the default alphas{p_end}
+{phang2}{cmd:. robustness using bsdraws.dta, meta(bsdraws_meta.dta) comps(bsdraws_comps.dta)}{p_end}
+
+{pstd}Request additional alphas. The bounds are computed for all
+comparisons and returned in {cmd:r(extra)}.{p_end}
+{phang2}{cmd:. robustness using bsdraws.dta, meta(bsdraws_meta.dta) comps(bsdraws_comps.dta) alpha(0.50 0.10 0.05)}{p_end}
+
+{marker results}{...}
+{title:Stored results}
+
+{pstd}
+{cmd:robustness} stores the following in {cmd:r()}.
+
+{synoptset 16 tabbed}{...}
+{p2col 5 16 20 2: Scalars}{p_end}
+{synopt:{cmd:r(nspecs)}}number of specifications K{p_end}
+{synopt:{cmd:r(ncomps)}}number of comparisons{p_end}
+{synopt:{cmd:r(B)}}number of bootstrap replications{p_end}
+
+{synoptset 16 tabbed}{...}
+{p2col 5 16 20 2: Macros}{p_end}
+{synopt:{cmd:r(comparisons)}}names of the comparisons computed{p_end}
+
+{synoptset 16 tabbed}{...}
+{p2col 5 16 20 2: Matrices}{p_end}
+{synopt:{cmd:r(specs)}}Nspecs x 4 matrix of Panel A data. Rows are the spec
+labels from the metadata; columns are {cmd:theta}, {cmd:se}, {cmd:n_full},
+{cmd:n_boot}{p_end}
+{synopt:{cmd:r(table)}}Ncomps x 12 matrix of Panel B data. Rows are the
+comparison names; columns are {cmd:theta_bar}, {cmd:R}, {cmd:p_R}, {cmd:W},
+{cmd:p_W}, {cmd:delta_R_50}, {cmd:delta_R_05}, {cmd:delta_W_50},
+{cmd:delta_W_05}, {cmd:ratio}, {cmd:K}, {cmd:dropped}{p_end}
+{synopt:{cmd:r(extra)}}Ncomps x (2 * n_extras) matrix, present only when
+{cmd:alpha()} requests significance levels beyond .50 and .05. Rows are the
+comparison names; columns are {cmd:delta_R_a}{it:XX} and
+{cmd:delta_W_a}{it:XX} for each extra alpha, where {it:XX} is the two-digit
+alpha (alpha=0.10 -> a10){p_end}
+
+{marker references}{...}
+{title:References}
+
+{phang}
+Jaeger, D. A. 2026. Robustness? Range Tests for Equality and Equivalence
+Across Specifications. Working paper.
+
+{title:Author}
+
+{pstd}David A. Jaeger, University of St Andrews.{p_end}
