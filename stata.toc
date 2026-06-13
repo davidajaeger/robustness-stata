@@ -1,0 +1,10 @@
+v 3
+d robustness -- Range tests for equality and equivalence across specifications
+d
+d Jaeger (2026), "Robustness? Range Tests for Equality and Equivalence
+d Across Specifications." Computes range-based and Wald-based tests of
+d equality and equivalence across specifications from saved bootstrap draws.
+d
+d Author: David A. Jaeger, University of St Andrews
+d
+p robustness  Range tests for equality and equivalence across specifications
