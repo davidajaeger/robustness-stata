@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.0  Jaeger (2026)}{...}
+{* *! version 1.1.0  Jaeger (2026)}{...}
 {viewerjumpto "Syntax" "robustness##syntax"}{...}
 {viewerjumpto "Description" "robustness##description"}{...}
 {viewerjumpto "Options" "robustness##options"}{...}
@@ -36,7 +36,7 @@ specifications, from saved bootstrap draws
 {syntab:Optional}
 {synopt :{opth a:lpha(numlist)}}significance levels for equivalence margins.
 Default {cmd:alpha(0.50 0.05)}, matching Panel B in the paper. Additional
-alphas are computed for the last comparison and stored in {cmd:r()} but are
+alphas are computed for every comparison and returned in {cmd:r(extra)} but are
 not added to Panel B{p_end}
 {synopt :{opt maxd:rop(#)}}maximum percent of incomplete replications before
 aborting. Default {cmd:maxdrop(1)}{p_end}
@@ -57,8 +57,8 @@ and bootstrap-average n.
 
 {phang}
 {bf:Panel B: Comparison-set statistics.} One row per comparison, with columns
-for K, mean point estimate, observed range, delta*(.50), delta*(.05),
-bootstrap p-value p_R, and the robustness ratio delta*(.05)/|theta_bar|.
+for K, mean point estimate, observed range, R*(.50), R*(.95),
+bootstrap p-value p_R, and the robustness ratio R*(.95)/|theta_bar|.
 
 {pstd}
 Equivalence bounds are computed at alpha = .50 and .05, matching Panel B in
@@ -84,13 +84,13 @@ without disturbing the user's data.
 {opth alpha(numlist)} sets the significance levels for the equivalence
 margins. Each value must be strictly between 0 and 1. The default is
 {cmd:alpha(0.50 0.05)}, matching Panel B in Jaeger (2026): the median bound
-delta*(.50) (a point estimate of Delta) and the 95th-percentile upper bound
-delta*(.05). Panel B always reports these two columns. If the user supplies
+R*(.50) (a point estimate of Delta) and the 95th-percentile upper bound
+R*(.95). Panel B always reports these two columns. If the user supplies
 additional alphas, those are computed for every comparison and returned in
-the matrix {cmd:r(extra)}, with columns {cmd:delta_R_a}{it:XX} and
-{cmd:delta_W_a}{it:XX} for each extra alpha (where {it:XX} is the two-digit
-alpha; for example, alpha=0.10 -> a10). The additional bounds are not added
-to Panel B's printed output.
+the matrix {cmd:r(extra)}, with columns {cmd:Rstar_}{it:XX} and
+{cmd:Wstar_}{it:XX} for each extra alpha (where {it:XX} is the quantile level
+1-alpha as two digits; for example, alpha=0.10 -> {cmd:Rstar_90}). The
+additional bounds are not added to Panel B's printed output.
 
 {phang}
 {opt maxdrop(#)} sets the maximum percentage of bootstrap replications that
@@ -107,32 +107,42 @@ intended distribution. The default is {cmd:1}.
 {pstd}
 {bf:Draws file} ({cmd:using}). One observation per bootstrap replication.
 Variables {cmd:rep}, {cmd:coef1} {cmd:se1} {cmd:coef2} {cmd:se2} ... , one
-coef/se pair per specification in column order. Optional {cmd:n1} {cmd:n2}
+coef/se pair per specification in column order. The {cmd:se} columns are
+checked for presence but are not used by any statistic, which reads the
+{cmd:coef} columns only. Optional {cmd:n1} {cmd:n2}
 ... carry per-spec bootstrap sample sizes; if present for every spec, the
 command reports the bootstrap-average n per spec in Panel A. The coefficient
 draws must be raw, that is uncentred. All recentring happens inside the
 command.
 
 {pstd}
-{bf:Metadata file} ({opt meta()}). One observation per specification, in
-column order. Variables {cmd:k}, {cmd:label}, {cmd:theta}, {cmd:se}, where
-{cmd:theta} is the full-sample point estimate. Optional {cmd:n} carries the
-full-sample sample size, shown in Panel A if present.
+{bf:Metadata file} ({opt meta()}). One observation per specification.
+Variables {cmd:k}, {cmd:label}, {cmd:theta}, {cmd:se}, where {cmd:k} is the
+specification index and {cmd:theta} is the full-sample point estimate.
+{cmd:k} is required and must list each specification exactly once over
+1 to K. The command sorts by {cmd:k}, so the rows need not be supplied in
+order, but {cmd:k} fixes the mapping to the draws file: specification
+{cmd:k} pairs with {cmd:coef}{it:k} and {cmd:se}{it:k}. Optional {cmd:n}
+carries the full-sample sample size, shown in Panel A if present.
 
 {pstd}
 {bf:Comparisons file} ({opt comps()}). One observation per comparison.
 Variables {cmd:comp_name} and {cmd:comp_cols}, where {cmd:comp_cols} is a
 space-separated list of 1-indexed column numbers. A comparison needs at
-least two specifications, and every column number must be an integer in the
-range 1 to K.
+least two specifications, every column number must be an integer in the
+range 1 to K, and a specification may appear at most once in a comparison
+(duplicates are rejected). {cmd:comp_name} is used as an identifier in the
+output table and in {cmd:r()}; any label is accepted, but one that is not a
+valid Stata name is converted with {help strtoname:strtoname()} (for example
+"All specs" becomes {cmd:All_specs}), and the command reports the conversion.
 
 {marker output}{...}
 {title:Output}
 
 {pstd}
-Panel B's robustness ratio delta*(.05)/|theta_bar| is the heuristic ratio
+Panel B's robustness ratio R*(.95)/|theta_bar| is the heuristic ratio
 defined in Jaeger (2026), Section 4. When |theta_bar| is close to zero,
-interpret it with caution: the ratio can be large even when delta*(.05) is
+interpret it with caution: the ratio can be large even when R*(.95) is
 economically small. In such cases, judge the bound directly in coefficient
 units rather than as a ratio.
 
@@ -148,7 +158,7 @@ appear in Panel A.
 The single requirement the command cannot verify is that the same resampled
 units were used for all specifications on each replication. Resampling
 independently per specification destroys the joint distribution across
-specifications and produces wrong p_R and delta* with no error and no
+specifications and produces wrong p_R and R* with no error and no
 warning. The guarantee must be enforced in the generation step. The
 generation examples accompanying Jaeger (2026) enforce and teach it.
 
@@ -185,13 +195,13 @@ labels from the metadata; columns are {cmd:theta}, {cmd:se}, {cmd:n_full},
 {cmd:n_boot}{p_end}
 {synopt:{cmd:r(table)}}Ncomps x 12 matrix of Panel B data. Rows are the
 comparison names; columns are {cmd:theta_bar}, {cmd:R}, {cmd:p_R}, {cmd:W},
-{cmd:p_W}, {cmd:delta_R_50}, {cmd:delta_R_05}, {cmd:delta_W_50},
-{cmd:delta_W_05}, {cmd:ratio}, {cmd:K}, {cmd:dropped}{p_end}
+{cmd:p_W}, {cmd:Rstar_50}, {cmd:Rstar_95}, {cmd:Wstar_50},
+{cmd:Wstar_95}, {cmd:ratio}, {cmd:K}, {cmd:dropped}{p_end}
 {synopt:{cmd:r(extra)}}Ncomps x (2 * n_extras) matrix, present only when
 {cmd:alpha()} requests significance levels beyond .50 and .05. Rows are the
-comparison names; columns are {cmd:delta_R_a}{it:XX} and
-{cmd:delta_W_a}{it:XX} for each extra alpha, where {it:XX} is the two-digit
-alpha (alpha=0.10 -> a10){p_end}
+comparison names; columns are {cmd:Rstar_}{it:XX} and
+{cmd:Wstar_}{it:XX} for each extra alpha, where {it:XX} is the quantile level
+1-alpha as two digits (alpha=0.10 -> {cmd:Rstar_90}){p_end}
 
 {marker references}{...}
 {title:References}

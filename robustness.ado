@@ -1,4 +1,4 @@
-*! version 1.0.0  Jaeger (2026)  Range Tests for Equality and Equivalence
+*! version 1.1.0  Jaeger (2026)  Range Tests for Equality and Equivalence
 *! robustness -- compute robustness statistics from saved bootstrap draws
 program define robustness, rclass
     version 16.1
@@ -10,13 +10,13 @@ program define robustness, rclass
 
       Reads three files produced by an application's bootstrap-generation
       step and computes, for each comparison, the equality test (R, p_R,
-      W, p_W) and the equivalence margins (delta*_R and delta*_W) at one or
+      W, p_W) and the equivalence bounds (R* and W*) at one or
       more significance levels.
 
       The command reads its inputs from disk and does not touch the data in
       memory. The single requirement it cannot verify is that the same
       resampled units were used for all specifications on each replication.
-      That guarantee lives in the generation step.
+      That guarantee must be in the generation step.
 
       Syntax
       ------
@@ -24,7 +24,7 @@ program define robustness, rclass
               [ Alpha(numlist) MAXDrop(real 1) ]
 
         using DRAWSFILE   B-row file of raw bootstrap draws, with variables
-                          rep coef1 se1 coef2 se2 ... (uncentred draws)
+                          rep coef1 se1 coef2 se2 ... (uncentered draws)
                           optional per-spec sample sizes n1 n2 ... may be
                           included; if present for every spec, the command
                           reports average bootstrap n per spec in Panel A.
@@ -45,10 +45,11 @@ program define robustness, rclass
     syntax using/, Meta(string) Comps(string) ///
         [ Alpha(numlist >0 <1 sort) MAXDrop(real 1) ]
 
-    * The Panel B layout in Jaeger (2026) reports delta* at alpha = .50 and
-    * .05. Those two are always computed and shown. Users may request
-    * additional alphas via alpha(); the additional bounds are computed for
-    * the last comparison and stored in r() but not added to Panel B.
+    * The Panel B layout in Jaeger (2026) reports R* at alpha = .50 and .05
+    * (that is, R*_{.50} and R*_{.95}). Those two are always computed and
+    * shown. Users may request additional alphas via alpha(); the additional
+    * bounds are computed for every comparison and returned in r(extra), not
+    * added to Panel B.
     if "`alpha'" == "" local alpha "0.50 0.05"
     local extra_alphas ""
     foreach a of local alpha {
@@ -85,10 +86,13 @@ program define robustness, rclass
     preserve
 
     * --------------------------------------------------------------------
-    * 1. Metadata: validate, build theta_hat
+    * 1. Metadata: validate, enforce spec ordering via k, build theta_hat
     * --------------------------------------------------------------------
     quietly use "`meta'", clear
-    foreach v in label theta se {
+
+    * Required variables. k is the specification index and is enforced: it
+    * binds metadata row r to the draws-file column coef`r'.
+    foreach v in k label theta se {
         capture confirm variable `v'
         if _rc {
             di as error "Metadata file is missing required variable '`v''."
@@ -104,6 +108,40 @@ program define robustness, rclass
         restore
         exit 2000
     }
+
+    * k must be a permutation of 1..nspecs: numeric, nonmissing, integer, no
+    * duplicates, with min 1 and max nspecs. For a file of nspecs rows those
+    * conditions force k to be exactly {1,...,nspecs}. We then sort by k so
+    * that row position equals specification number and the position-based
+    * read below is correct.
+    capture confirm numeric variable k
+    if _rc {
+        di as error "Metadata variable 'k' must be numeric (the specification index 1..`nspecs')."
+        restore
+        exit 109
+    }
+    qui count if missing(k) | k != floor(k)
+    if r(N) {
+        di as error "Metadata 'k' must be a nonmissing integer in every row."
+        restore
+        exit 198
+    }
+    tempvar ktag
+    qui duplicates tag k, generate(`ktag')
+    qui count if `ktag' > 0
+    if r(N) {
+        di as error "Metadata 'k' has duplicate values; each specification must appear exactly once."
+        restore
+        exit 198
+    }
+    qui summarize k, meanonly
+    if r(min) != 1 | r(max) != `nspecs' {
+        di as error "Metadata 'k' must span 1..`nspecs' with no gaps (found min `=r(min)', max `=r(max)')."
+        restore
+        exit 198
+    }
+    sort k
+
     * Full-sample n per spec is optional in the metadata. Shown if present.
     capture confirm variable n
     local meta_has_n = (_rc == 0)
@@ -147,6 +185,7 @@ program define robustness, rclass
     di "  Number of comparisons: `ncomps'"
 
     local comparisons ""
+    local used_safe ""
     forvalues c = 1/`ncomps' {
         local cname = comp_name[`c']
         local ccols = comp_cols[`c']
@@ -175,14 +214,45 @@ program define robustness, rclass
             }
             local m = `m' + 1
         }
+
+        * Reject duplicate columns. Each specification may appear at most once;
+        * a repeat would overstate K and make the bootstrap covariance
+        * singular. list dups returns the repeated tokens; uniq trims the
+        * message to one mention of each. Token-safe: "1" and "12" never match.
+        local cdups : list dups ccols
+        if "`cdups'" != "" {
+            local cdups : list uniq cdups
+            di as error "Comparison '`cname'' lists specification(s) `cdups' more than once; each spec may appear at most once."
+            restore
+            exit 198
+        }
+
         if `m' < 2 {
             di as error "Comparison '`cname'' has fewer than 2 specifications."
             restore
             exit 2000
         }
-        local comp_`cname' "`ccols'"
-        local comparisons "`comparisons' `cname'"
-        di "  `cname': specs `ccols'"
+        * Comparison names are used as identifiers: as local-macro keys here
+        * and as matrix row names in r(table). They must therefore be valid
+        * Stata names. strtoname() converts any label (spaces, hyphens, and so
+        * on) into one; collisions are disambiguated with a numeric suffix. The
+        * safe name is what appears in the printed table and in r(); a note is
+        * printed whenever it differs from the label the user supplied.
+        local safe = strtoname("`cname'")
+        local j = 1
+        local pos : list posof "`safe'" in used_safe
+        while `pos' > 0 {
+            local j = `j' + 1
+            local safe = strtoname("`cname'") + "_`j'"
+            local pos : list posof "`safe'" in used_safe
+        }
+        local used_safe "`used_safe' `safe'"
+        if "`safe'" != "`cname'" {
+            di as text "  (comparison '`cname'' recorded as '`safe'')"
+        }
+        local comp_`safe' "`ccols'"
+        local comparisons "`comparisons' `safe'"
+        di "  `safe': specs `ccols'"
     }
     local comparisons = strtrim("`comparisons'")
 
@@ -266,18 +336,20 @@ version 16.1
 mata:
 mata set matastrict on
 
-// Quantile, R type 7 (h = p*(n-1)+1). Drops missing before computing.
+// Type-1 sample quantile: the inverse of the empirical c.d.f., i.e. the
+// smallest order statistic x_(j) with at least a share p of the data <= x_(j),
+// which is x_(ceil(n*p)). Matches R quantile(type=1) and is the paper's
+// definition of R*_{1-alpha}. Drops missing before computing.
 real scalar _rob_quantile(real colvector v, real scalar p) {
     real colvector sv
-    real scalar    n, h
-    sv = select(v, v :< .)
-    n  = rows(sv)
+    real scalar    n, idx
+    sv  = sort(select(v, v :< .), 1)
+    n   = rows(sv)
     if (n == 0) return(.)
-    sv = sort(sv, 1)
-    h  = p * (n - 1) + 1
-    if (h <= 1) return(sv[1])
-    if (h >= n) return(sv[n])
-    return(sv[floor(h)] + (h - floor(h)) * (sv[ceil(h)] - sv[floor(h)]))
+    idx = ceil(n * p)
+    if (idx < 1) idx = 1
+    if (idx > n) idx = n
+    return(sv[idx])
 }
 
 // Grand-mean contrast matrix, (K-1) x K.
@@ -300,45 +372,43 @@ real rowvector _rob_str2cols(string scalar s) {
     return(v)
 }
 
-// Compute per-comparison statistics. Pure function: no side effects, no
-// scratch scalars. Returns a 12-element column vector in the canonical
-// column order used by r(table):
+// Per-comparison statistics. Reads the uncentred draws two ways: uncentred
+// for the equivalence bounds, recentred for the equality p-values. Returns a
+// 12-element column vector in the canonical r(table) order:
 //
-//   1  theta_bar    (mean of theta_hat across comparison specs)
-//   2  R            (observed range)
-//   3  p_R          (range-test bootstrap p-value)
-//   4  W            (observed Wald statistic)
-//   5  p_W          (Wald-test bootstrap p-value)
-//   6  delta_R_50   (range-based equivalence bound, alpha=.50)
-//   7  delta_R_05   (range-based equivalence bound, alpha=.05)
-//   8  delta_W_50   (Wald-based equivalence bound, alpha=.50)
-//   9  delta_W_05   (Wald-based equivalence bound, alpha=.05)
-//   10 ratio        (delta_R_05 / |theta_bar|, missing if theta_bar==0)
-//   11 K            (number of specs in the comparison)
-//   12 dropped      (number of incomplete bootstrap reps for this comparison)
+//   1  theta_bar   mean of the estimates in the comparison
+//   2  R           observed range, max(theta) - min(theta)
+//   3  p_R         range equality p-value (recentred bootstrap)
+//   4  W           observed Wald statistic
+//   5  p_W         Wald equality p-value (recentred bootstrap)
+//   6  Rstar_50    R*_{.50}, median of the uncentred bootstrap range
+//   7  Rstar_95    R*_{.95}, the minimum equivalence bound
+//   8  Wstar_50    W*_{.50}, sqrt of the .50 uncentred Wald quantile
+//   9  Wstar_95    W*_{.95}, Wald-scale equivalence bound
+//   10 ratio       Rstar_95 / |theta_bar| (missing if theta_bar == 0)
+//   11 K           number of specifications in the comparison
+//   12 dropped     incomplete bootstrap replications for this comparison
 //
-// Aborts on too many incomplete reps; max_drop enforces the bound.
+// Aborts if too few complete replications remain or the dropped share
+// exceeds maxdrop.
 real colvector _rob_compute(real matrix theta, real matrix DRAWS,
                             real rowvector cols, real scalar maxdrop,
                             string scalar label) {
-    real scalar    B, K, i, B_orig, dropped, dropshare
-    real matrix    th, D, Vhat, Rmat, RVR, RVRinv, d, d_b, d_b_rc
-    real colvector W_boot, R_boot, W_boot_rc, R_boot_rc, _ok, out
-    real scalar    W_obs, R_obs, theta_bar, pW, pR, ratio
-    real scalar    q_R_50, q_R_05, q_W_50, q_W_05
-    real scalar    delta_R_50, delta_R_05, delta_W_50, delta_W_05
+    real scalar    B, K, B_orig, dropped, dropshare, theta_bar, W_obs, R_obs
+    real scalar    p_R, p_W, ratio
+    real matrix    th, D, Rmat, RVRinv, Bd, Bdc, Dc
+    real colvector R_unc, W_unc, R_rc, W_rc, out
 
-    th = theta[cols', 1]
-    D  = DRAWS[., cols]
+    th = theta[cols', 1]            // K x 1 full-sample estimates
+    D  = DRAWS[., cols]             // B x K uncentred bootstrap draws
     K  = cols(D)
 
+    // Keep only replications complete across these specs; count and police.
     B_orig    = rows(D)
-    _ok       = rowmissing(D) :== 0
-    D         = select(D, _ok)
+    D         = select(D, rowmissing(D) :== 0)
     B         = rows(D)
     dropped   = B_orig - B
     dropshare = dropped / B_orig
-
     if (B < K) {
         printf("\n%s: only %g complete reps of %g, need at least %g.\n",
                label, B, B_orig, K)
@@ -354,58 +424,53 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
         exit(error(2001))
     }
 
-    Vhat   = variance(D)
+    // Grand-mean contrast (K-1 x K) and the bootstrap covariance of the K
+    // estimates. RVRinv weights the Wald; the covariance carries the
+    // cross-specification dependence the shared resample induces.
     Rmat   = _rob_contrast(K)
-    RVR    = Rmat * Vhat * Rmat'
-    RVRinv = invsym(RVR)
+    RVRinv = invsym(Rmat * variance(D) * Rmat')
 
-    d         = Rmat * th
-    W_obs     = (d' * RVRinv * d)[1,1]
-    R_obs     = max(th) - min(th)
+    // Observed statistics, from the full-sample estimates.
     theta_bar = mean(th)
+    R_obs     = max(th) - min(th)
+    W_obs     = ((Rmat*th)' * RVRinv * (Rmat*th))[1,1]
 
-    W_boot    = J(B, 1, .)
-    R_boot    = J(B, 1, .)
-    W_boot_rc = J(B, 1, .)
-    R_boot_rc = J(B, 1, .)
-    for (i=1; i<=B; i++) {
-        d_b          = Rmat * D[i,.]'
-        W_boot[i]    = (d_b' * RVRinv * d_b)[1,1]
-        R_boot[i]    = max(D[i,.]) - min(D[i,.])
-        d_b_rc       = Rmat * (D[i,.]' :- th :+ theta_bar)
-        W_boot_rc[i] = (d_b_rc' * RVRinv * d_b_rc)[1,1]
-        R_boot_rc[i] = max(D[i,.] :- th' :+ theta_bar) ///
-                      - min(D[i,.] :- th' :+ theta_bar)
-    }
-    pW = mean(W_boot_rc :>= W_obs)
-    pR = mean(R_boot_rc :>= R_obs)
+    // Uncentred bootstrap range and Wald, one per replication. These feed
+    // the equivalence bounds.
+    R_unc = rowmax(D) :- rowmin(D)
+    Bd    = Rmat * D'
+    W_unc = colsum(Bd :* (RVRinv * Bd))'
 
-    q_R_50 = _rob_quantile(R_boot :- R_obs, 0.50)
-    q_R_05 = _rob_quantile(R_boot :- R_obs, 0.95)
-    q_W_50 = _rob_quantile(W_boot :- W_obs, 0.50)
-    q_W_05 = _rob_quantile(W_boot :- W_obs, 0.95)
+    // Recentred draws: subtract each spec's deviation from the cross-spec
+    // mean (theta_hat_k - theta_bar), imposing Delta = 0. The common
+    // +theta_bar shift cancels in the range and in the contrast, so it does
+    // not affect p_R or p_W; it is kept to mirror the paper's definition.
+    Dc    = D :- th' :+ theta_bar
+    R_rc  = rowmax(Dc) :- rowmin(Dc)
+    Bdc   = Rmat * Dc'
+    W_rc  = colsum(Bdc :* (RVRinv * Bdc))'
 
-    delta_R_50 = R_obs + q_R_50
-    delta_R_05 = R_obs + q_R_05
-    delta_W_50 = sqrt(max((W_obs + q_W_50, 0)))
-    delta_W_05 = sqrt(max((W_obs + q_W_05, 0)))
+    // Equality p-values: share of recentred statistics at or above observed.
+    p_R = mean(R_rc :>= R_obs)
+    p_W = mean(W_rc :>= W_obs)
 
-    if (abs(theta_bar) > 0) ratio = delta_R_05 / abs(theta_bar)
+    // Robustness ratio uses R*_{.95}.
+    if (abs(theta_bar) > 0) ratio = _rob_quantile(R_unc, 0.95) / abs(theta_bar)
     else                    ratio = .
 
-    out = J(12, 1, .)
-    out[ 1] = theta_bar
-    out[ 2] = R_obs
-    out[ 3] = pR
-    out[ 4] = W_obs
-    out[ 5] = pW
-    out[ 6] = delta_R_50
-    out[ 7] = delta_R_05
-    out[ 8] = delta_W_50
-    out[ 9] = delta_W_05
-    out[10] = ratio
-    out[11] = K
-    out[12] = dropped
+    out      = J(12, 1, .)
+    out[ 1]  = theta_bar
+    out[ 2]  = R_obs
+    out[ 3]  = p_R
+    out[ 4]  = W_obs
+    out[ 5]  = p_W
+    out[ 6]  = _rob_quantile(R_unc, 0.50)          // R*_{.50}
+    out[ 7]  = _rob_quantile(R_unc, 0.95)          // R*_{.95}
+    out[ 8]  = sqrt(_rob_quantile(W_unc, 0.50))    // W*_{.50}
+    out[ 9]  = sqrt(_rob_quantile(W_unc, 0.95))    // W*_{.95}
+    out[10]  = ratio
+    out[11]  = K
+    out[12]  = dropped
     return(out)
 }
 
@@ -501,7 +566,7 @@ void _rob_print_panel_a(string rowvector labels, real matrix theta_hat,
 // Print Panel B: comparison-set statistics.
 // Reads from the canonical results matrix (12 rows, columns indexed by
 // the column order documented in _rob_compute). The printed columns are:
-//   Comparison set, K, theta_bar, R(theta), d*(.50), d*(.05), p_R, Rob. ratio
+//   Comparison set, K, theta_bar, R(theta), R*(.50), R*(.95), p_R, Rob. ratio
 // Headers right-justified to align with the data positions produced by the
 // %f format specs.
 void _rob_print_panel_b(string rowvector cnames, real matrix results,
@@ -533,14 +598,14 @@ void _rob_print_panel_b(string rowvector cnames, real matrix results,
     header = header + " "    + _rob_rpad("K",          w_K)
     header = header + "   "  + _rob_rpad("theta_bar",  w_theta)
     header = header + "   "  + _rob_rpad("R(theta)",   w_R)
-    header = header + "   "  + _rob_rpad("d*(.50)",    w_d50)
-    header = header + "   "  + _rob_rpad("d*(.05)",    w_d05)
+    header = header + "   "  + _rob_rpad("R*(.50)",    w_d50)
+    header = header + "   "  + _rob_rpad("R*(.95)",    w_d05)
     header = header + "  "   + _rob_rpad("p_R",        w_pR)
     header = header + "       " + _rob_rpad("Rob. ratio", w_ratio)
     printf("%s\n", header)
 
     // Data rows. Column indices match the order in _rob_compute:
-    //   1 theta_bar, 2 R, 3 p_R, 6 delta_R_50, 7 delta_R_05, 10 ratio, 11 K
+    //   1 theta_bar, 2 R, 3 p_R, 6 Rstar_50, 7 Rstar_95, 10 ratio, 11 K
     for (c=1; c<=nc; c++) {
         cn        = cnames[c]
         theta_bar = results[ 1, c]
@@ -608,21 +673,16 @@ void _rob_print_n_note(real matrix N, string rowvector cnames,
     }
 }
 
-// Compute extra-alpha bounds for the given comparison. Recomputes the
-// bootstrap range and Wald distributions (cheap), then stores each
-// alpha's delta*_R and delta*_W in Stata scalars __rob_delta_R_aXX and
-// __rob_delta_W_aXX where XX is the two-digit alpha (e.g. alpha=.10 -> a10).
-// Compute extra-alpha bounds for all comparisons. Returns a Ncomps x
-// (2 * n_extras) matrix. Columns are arranged as alternating
-// delta_R_aXX, delta_W_aXX pairs for each extra alpha in extralist order.
-// Column names are built separately by _rob_extras_colnames.
+// Extra-alpha bounds for every comparison. Returns an Ncomps x (2*n_extras)
+// matrix, columns alternating Rstar, Wstar for each extra alpha. Uses the
+// uncentred range and Wald, the same objects as the main path.
 real matrix _rob_compute_extras(real matrix theta, real matrix DRAWS,
-                                string scalar comparisons, string scalar comp_prefix,
+                                string scalar comparisons,
+                                string scalar comp_prefix,
                                 string scalar extralist) {
-    real scalar      nc, c, na, a, K, B, i, alpha, q_R, q_W
-    real scalar      W_obs, R_obs
-    real matrix      th, D, Vhat, Rmat, RVR, RVRinv, d, d_b, out
-    real colvector   W_boot, R_boot, _ok
+    real scalar      nc, c, na, a, K, alpha
+    real matrix      D, Rmat, RVRinv, Bd, out_extra
+    real colvector   R_unc, W_unc
     real rowvector   cols
     string rowvector compnames, alphas
 
@@ -630,64 +690,41 @@ real matrix _rob_compute_extras(real matrix theta, real matrix DRAWS,
     nc        = cols(compnames)
     alphas    = tokens(extralist)
     na        = cols(alphas)
-    out       = J(nc, 2 * na, .)
+    out_extra = J(nc, 2 * na, .)
 
     for (c=1; c<=nc; c++) {
-        cols = _rob_str2cols(st_local(comp_prefix + compnames[c]))
-        th = theta[cols', 1]
-        D  = DRAWS[., cols]
-        K  = cols(D)
-        _ok = rowmissing(D) :== 0
-        D   = select(D, _ok)
-        B   = rows(D)
-
-        Vhat   = variance(D)
+        cols   = _rob_str2cols(st_local(comp_prefix + compnames[c]))
+        D      = select(DRAWS[., cols], rowmissing(DRAWS[., cols]) :== 0)
+        K      = cols(D)
         Rmat   = _rob_contrast(K)
-        RVR    = Rmat * Vhat * Rmat'
-        RVRinv = invsym(RVR)
-
-        d     = Rmat * th
-        W_obs = (d' * RVRinv * d)[1,1]
-        R_obs = max(th) - min(th)
-
-        W_boot = J(B, 1, .)
-        R_boot = J(B, 1, .)
-        for (i=1; i<=B; i++) {
-            d_b       = Rmat * D[i,.]'
-            W_boot[i] = (d_b' * RVRinv * d_b)[1,1]
-            R_boot[i] = max(D[i,.]) - min(D[i,.])
-        }
-
+        RVRinv = invsym(Rmat * variance(D) * Rmat')
+        R_unc  = rowmax(D) :- rowmin(D)
+        Bd     = Rmat * D'
+        W_unc  = colsum(Bd :* (RVRinv * Bd))'
         for (a=1; a<=na; a++) {
             alpha = strtoreal(alphas[a])
-            q_R   = _rob_quantile(R_boot :- R_obs, 1-alpha)
-            q_W   = _rob_quantile(W_boot :- W_obs, 1-alpha)
-            out[c, 2*(a-1) + 1] = R_obs + q_R
-            out[c, 2*(a-1) + 2] = sqrt(max((W_obs + q_W, 0)))
+            out_extra[c, 2*(a-1) + 1] =      _rob_quantile(R_unc, 1 - alpha)
+            out_extra[c, 2*(a-1) + 2] = sqrt(_rob_quantile(W_unc, 1 - alpha))
         }
     }
-
-    return(out)
+    return(out_extra)
 }
 
-// Build column names for r(extra) from the extra-alphas list. Returns a
-// row vector of length 2 * n_extras: delta_R_aXX, delta_W_aXX alternating,
-// where XX is the two-digit alpha (alpha=.10 -> "a10").
+// Column names for r(extra): Rstar_XX, Wstar_XX, where XX is the quantile
+// level 1-alpha as two digits (alpha=0.10 -> Rstar_90, Wstar_90).
 string rowvector _rob_extras_colnames(string scalar extralist) {
-    real scalar      na, a, atag, alpha
+    real scalar      na, a, tag, alpha
     string rowvector alphas, names
     string scalar    suffix
-
     alphas = tokens(extralist)
     na     = cols(alphas)
     names  = J(1, 2 * na, "")
     for (a=1; a<=na; a++) {
-        alpha = strtoreal(alphas[a])
-        atag  = round(alpha * 100)
-        if (atag < 10) suffix = "a0" + strofreal(atag)
-        else           suffix = "a"  + strofreal(atag)
-        names[2*(a-1) + 1] = "delta_R_" + suffix
-        names[2*(a-1) + 2] = "delta_W_" + suffix
+        alpha  = strtoreal(alphas[a])
+        tag    = round((1 - alpha) * 100)
+        suffix = (tag < 10 ? "0" : "") + strofreal(tag)
+        names[2*(a-1) + 1] = "Rstar_" + suffix
+        names[2*(a-1) + 2] = "Wstar_" + suffix
     }
     return(names)
 }
@@ -788,7 +825,7 @@ void _robustness_engine() {
     _rob_print_panel_b(comps, results, maxlab_b, divwidth)
     _rob_print_drop_notes(comps, results, B)
     if (has_n_boot) _rob_print_n_note(N, comps, "comp_")
-    printf("  Note: the robustness ratio is delta*(.05)/|theta_bar|. When |theta_bar| is close to zero,\n")
+    printf("  Note: the robustness ratio is R*(.95)/|theta_bar|. When |theta_bar| is close to zero,\n")
     printf("        interpret it with caution.\n")
 
     // --- Stage matrices for the ado to return via return matrix ---
@@ -810,7 +847,7 @@ void _robustness_engine() {
     st_matrix("__rob_table", results')
     st_matrixrowstripe("__rob_table", (J(cols(comps), 1, ""), comps'))
     table_colnames = ("theta_bar", "R", "p_R", "W", "p_W",
-                      "delta_R_50", "delta_R_05", "delta_W_50", "delta_W_05",
+                      "Rstar_50", "Rstar_95", "Wstar_50", "Wstar_95",
                       "ratio", "K", "dropped")
     st_matrixcolstripe("__rob_table", (J(12, 1, ""), table_colnames'))
 
