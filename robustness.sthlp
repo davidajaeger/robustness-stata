@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.1.0  Jaeger (2026)}{...}
+{* *! version 1.3.0  Jaeger (2026)}{...}
 {viewerjumpto "Syntax" "robustness##syntax"}{...}
 {viewerjumpto "Description" "robustness##description"}{...}
 {viewerjumpto "Options" "robustness##options"}{...}
@@ -24,9 +24,10 @@ specifications, from saved bootstrap draws
 {opth m:eta(filename)}
 {opth c:omps(filename)}
 [{opth a:lpha(numlist)}
-{opt maxd:rop(#)}]
+{opt maxd:rop(#)}
+{opt sav:ing(filename[, replace])}]
 
-{synoptset 20 tabbed}{...}
+{synoptset 24 tabbed}{...}
 {synopthdr}
 {synoptline}
 {syntab:Required}
@@ -40,6 +41,8 @@ alphas are computed for every comparison and returned in {cmd:r(extra)} but are
 not added to Panel B{p_end}
 {synopt :{opt maxd:rop(#)}}maximum percent of incomplete replications before
 aborting. Default {cmd:maxdrop(1)}{p_end}
+{synopt :{opt sav:ing(filename[, replace])}}save the per-replication bootstrap
+statistics to a {cmd:.dta} for plotting{p_end}
 {synoptline}
 
 {marker description}{...}
@@ -101,19 +104,34 @@ are dropped and counted. If the dropped share exceeds {opt maxdrop()} the
 command stops, because the surviving draws may no longer represent the
 intended distribution. The default is {cmd:1}.
 
+{pstd}
+{opt saving(filename[, replace])} writes the per-replication bootstrap
+statistics to {it:filename} (a {cmd:.dta}), the distributions that the
+reported summaries collapse to scalars. The file is in long form, one row per
+comparison-by-draw, with a string variable {cmd:comparison} and the numeric
+variables {cmd:draw}, {cmd:range_unc}, {cmd:range_rc}, {cmd:wald_unc},
+{cmd:wald_rc}. The uncentred series ({cmd:range_unc}, {cmd:wald_unc}) are the
+ones whose {cmd:(1-alpha)} quantiles are {cmd:R*} and {cmd:W*}; the recentred
+series ({cmd:range_rc}, {cmd:wald_rc}) are the ones whose tails at or above the
+observed statistic give {cmd:p_R} and {cmd:p_W}. Draws are renumbered 1 to B
+within each comparison after dropping incomplete replications, so the same
+{cmd:draw} number does not correspond to the same resample across comparisons.
+Specify {cmd:replace} to overwrite an existing file. The data in memory are
+left untouched. See the examples below for plotting.
+
 {marker inputs}{...}
 {title:Input files}
 
 {pstd}
 {bf:Draws file} ({cmd:using}). One observation per bootstrap replication.
-Variables {cmd:rep}, {cmd:coef1} {cmd:se1} {cmd:coef2} {cmd:se2} ... , one
-coef/se pair per specification in column order. The {cmd:se} columns are
-checked for presence but are not used by any statistic, which reads the
-{cmd:coef} columns only. Optional {cmd:n1} {cmd:n2}
-... carry per-spec bootstrap sample sizes; if present for every spec, the
-command reports the bootstrap-average n per spec in Panel A. The coefficient
-draws must be raw, that is uncentred. All recentring happens inside the
-command.
+The {cmd:coef1} {cmd:coef2} ... columns are required, one per specification
+in column order. Optional {cmd:rep} and per-spec {cmd:se1} {cmd:se2} ...
+columns may be present but are ignored: no statistic reads them (the Wald
+uses the bootstrap covariance of the {cmd:coef} draws). Optional {cmd:n1}
+{cmd:n2} ... carry per-spec bootstrap sample sizes; if present for every
+spec, the command reports the bootstrap-average n per spec in Panel A. The
+coefficient draws must be raw, that is uncentred. All recentring happens
+inside the command.
 
 {pstd}
 {bf:Metadata file} ({opt meta()}). One observation per specification.
@@ -171,6 +189,19 @@ generation examples accompanying Jaeger (2026) enforce and teach it.
 {pstd}Request additional alphas. The bounds are computed for all
 comparisons and returned in {cmd:r(extra)}.{p_end}
 {phang2}{cmd:. robustness using bsdraws.dta, meta(bsdraws_meta.dta) comps(bsdraws_comps.dta) alpha(0.50 0.10 0.05)}{p_end}
+
+{pstd}Save the per-replication statistics, then plot the equivalence-bound
+distribution for one comparison with the median and 95th-percentile bounds
+marked. The bounds are read from {cmd:r(table)}, which the command leaves
+behind.{p_end}
+{phang2}{cmd:. robustness using bsdraws.dta, meta(bsdraws_meta.dta) comps(bsdraws_comps.dta) saving(rdist.dta, replace)}{p_end}
+{phang2}{cmd:. matrix T = r(table)}{p_end}
+{phang2}{cmd:. use rdist.dta, clear}{p_end}
+{phang2}{cmd:. histogram range_unc if comparison=="main", xline(`=T["main","Rstar_50"]' `=T["main","Rstar_95"]')}{p_end}
+
+{pstd}Or visualize the equality test: the recentred range distribution with
+the observed range marked. The mass at or beyond the line is {cmd:p_R}.{p_end}
+{phang2}{cmd:. histogram range_rc if comparison=="main", xline(`=T["main","R"]')}{p_end}
 
 {marker results}{...}
 {title:Stored results}

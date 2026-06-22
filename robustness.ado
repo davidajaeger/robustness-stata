@@ -1,4 +1,4 @@
-*! version 1.1.0  Jaeger (2026)  Range Tests for Equality and Equivalence
+*! version 1.3.0  Jaeger (2026)  Range Tests for Equality and Equivalence
 *! robustness -- compute robustness statistics from saved bootstrap draws
 program define robustness, rclass
     version 16.1
@@ -16,19 +16,20 @@ program define robustness, rclass
       The command reads its inputs from disk and does not touch the data in
       memory. The single requirement it cannot verify is that the same
       resampled units were used for all specifications on each replication.
-      That guarantee must be in the generation step.
+      That guarantee lives in the generation step.
 
       Syntax
       ------
       robustness using DRAWSFILE, Meta(string) Comps(string)
-              [ Alpha(numlist) MAXDrop(real 1) ]
+              [ Alpha(numlist) MAXDrop(real 1) SAVing(string) ]
 
-        using DRAWSFILE   B-row file of raw bootstrap draws, with variables
-                          rep coef1 se1 coef2 se2 ... (uncentered draws)
-                          optional per-spec sample sizes n1 n2 ... may be
-                          included; if present for every spec, the command
-                          reports average bootstrap n per spec in Panel A.
-                          They are descriptive and do not enter any statistic.
+        using DRAWSFILE   B-row file of raw (uncentered) bootstrap draws. The
+                          coef1..coefK columns are required, one per spec in
+                          column order. Optional rep, per-spec se1 se2 ... and
+                          per-spec sample sizes n1 n2 ... may be included; the
+                          se columns are ignored, and if n is present for every
+                          spec the command reports average bootstrap n per spec
+                          in Panel A. None of these enter any statistic.
         meta()            K-row metadata file, variables k label theta se;
                           optional n column carries the full-sample sample
                           size and is shown in Panel A if present.
@@ -40,10 +41,19 @@ program define robustness, rclass
                           not added to Panel B's printed output.
         maxdrop()         max percent of incomplete reps before aborting
                           (default 1)
+        saving()          saving(filename [, replace]) writes the per-
+                          replication bootstrap statistics to a .dta, long,
+                          one row per comparison-by-draw, with variables
+                          comparison draw range_unc range_rc wald_unc wald_rc.
+                          These are the distributions the summaries collapse:
+                          the (1-alpha) quantile of range_unc is R*, the share
+                          of range_rc at or above the observed range is p_R.
+                          Intended for plotting. The data in memory are left
+                          untouched.
     =======================================================================*/
 
     syntax using/, Meta(string) Comps(string) ///
-        [ Alpha(numlist >0 <1 sort) MAXDrop(real 1) ]
+        [ Alpha(numlist >0 <1 sort) MAXDrop(real 1) SAVing(string) ]
 
     * The Panel B layout in Jaeger (2026) reports R* at alpha = .50 and .05
     * (that is, R*_{.50} and R*_{.95}). Those two are always computed and
@@ -61,6 +71,27 @@ program define robustness, rclass
     if `maxdrop' < 0 | `maxdrop' > 100 {
         di as error "maxdrop() must be between 0 and 100."
         exit 198
+    }
+
+    * Optional saving(filename [, replace]): write the per-replication bootstrap
+    * statistics (the distributions whose quantiles give R* and whose tails give
+    * p_R) to a .dta for plotting. Parse the filename and the lone permitted
+    * suboption here, before the data are touched.
+    local svfile ""
+    local svreplace ""
+    if `"`saving'"' != "" {
+        gettoken svfile svtail : saving, parse(",")
+        local svfile = strtrim(`"`svfile'"')
+        local svtail = strtrim(`"`svtail'"')
+        if `"`svtail'"' != "" {
+            gettoken comma svtail : svtail, parse(",")
+            local svtail = strtrim(`"`svtail'"')
+            if `"`svtail'"' != "replace" {
+                di as error "saving() allows only the optional suboption 'replace'."
+                exit 198
+            }
+            local svreplace "replace"
+        }
     }
 
     * Confirm all three files exist before touching the user's data.
@@ -271,17 +302,11 @@ program define robustness, rclass
             restore
             exit 111
         }
-        capture confirm variable se`k'
-        if _rc {
-            di as error "Draws file is missing variable 'se`k''."
-            restore
-            exit 111
-        }
         local coef_vars "`coef_vars' coef`k'"
-        * Per-spec sample size n`k' is optional. It is descriptive only and
-        * does not enter any statistic. If every spec has it, the command
-        * reports average n per spec. If any is absent, n reporting is
-        * skipped and the coef/se statistics are unaffected.
+        * Per-spec se`k' and sample size n`k' are optional and are not read by
+        * any statistic (the Wald uses the bootstrap covariance of the coef
+        * draws). They are ignored if present. If every spec has n`k', the
+        * command reports average n per spec; otherwise n reporting is skipped.
         capture confirm variable n`k'
         if _rc local has_n 0
         else   local n_vars "`n_vars' n`k'"
@@ -308,6 +333,17 @@ program define robustness, rclass
     * locals coef_vars, comparisons, comp_*, alpha, maxdrop, nspecs are all
     * in this program's scope.
     mata: _robustness_engine()
+
+    * If requested, write the per-replication statistics to a .dta. The draws
+    * are still in memory here, so _rob_save_draws() copies what it needs, then
+    * clears and rebuilds memory as the output dataset; the restore below brings
+    * the user's data back regardless.
+    if `"`svfile'"' != "" {
+        mata: _rob_save_draws()
+        quietly save `"`svfile'"', `svreplace'
+        di _n as text "Per-replication statistics saved to " as result `"`svfile'"' ///
+            as text " (`=_N' rows: comparison, draw, range_unc, range_rc, wald_unc, wald_rc)."
+    }
 
     * Restore the user's data.
     restore
@@ -450,9 +486,12 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
     Bdc   = Rmat * Dc'
     W_rc  = colsum(Bdc :* (RVRinv * Bdc))'
 
-    // Equality p-values: share of recentred statistics at or above observed.
-    p_R = mean(R_rc :>= R_obs)
-    p_W = mean(W_rc :>= W_obs)
+    // Equality p-values, Monte Carlo form (1 + #)/(B + 1): the observed
+    // statistic joins its own reference set, so the p-value is bounded away
+    // from zero (minimum 1/(B+1)) and is uniform under the null by
+    // exchangeability (Davison and Hinkley 1997). B is the complete-rep count.
+    p_R = (1 + sum(R_rc :>= R_obs)) / (B + 1)
+    p_W = (1 + sum(W_rc :>= W_obs)) / (B + 1)
 
     // Robustness ratio uses R*_{.95}.
     if (abs(theta_bar) > 0) ratio = _rob_quantile(R_unc, 0.95) / abs(theta_bar)
@@ -472,6 +511,77 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
     out[11]  = K
     out[12]  = dropped
     return(out)
+}
+
+// Build the per-replication statistics dataset for saving(). For every
+// comparison it recomputes the four bootstrap series that the summary path
+// produces internally -- the uncentred range and Wald (whose quantiles are
+// R* and W*) and the recentred range and Wald (whose tails give p_R and p_W)
+// -- and stacks them long, one row per (comparison, complete draw). The
+// arithmetic mirrors _rob_compute exactly; this routine only exposes the
+// per-draw series rather than collapsing them to quantiles.
+//
+// Called while the draws are still in memory. It copies the coef columns with
+// st_data (not a view), then clears memory and rebuilds it as the output
+// dataset; the caller saves it and restores the user's data.
+void _rob_save_draws() {
+    real matrix      theta, DRAWS, D, Dc, Rmat, RVRinv, Bd, Bdc, M, block
+    real colvector   keeprows, ru, rr, wu, wr, th
+    real rowvector   cols
+    real scalar      nc, c, K, Bc, theta_bar, mx, i
+    string rowvector coefvars, compnames
+    string colvector names, nblock
+
+    theta     = st_matrix("theta_hat")
+    coefvars  = tokens(st_local("coef_vars"))
+    DRAWS     = st_data(., coefvars)
+    compnames = tokens(st_local("comparisons"))
+    nc        = cols(compnames)
+
+    M     = J(0, 5, .)
+    names = J(0, 1, "")
+
+    for (c = 1; c <= nc; c++) {
+        cols = _rob_str2cols(st_local("comp_" + compnames[c]))
+        th   = theta[cols', 1]
+
+        D        = DRAWS[., cols]
+        keeprows = rowmissing(D) :== 0
+        D        = select(D, keeprows)
+        Bc       = rows(D)
+        if (Bc == 0) continue
+        K        = cols(D)
+
+        Rmat      = _rob_contrast(K)
+        RVRinv    = invsym(Rmat * variance(D) * Rmat')
+        theta_bar = mean(th)
+
+        ru  = rowmax(D) :- rowmin(D)
+        Bd  = Rmat * D'
+        wu  = colsum(Bd :* (RVRinv * Bd))'
+
+        Dc  = D :- th' :+ theta_bar
+        rr  = rowmax(Dc) :- rowmin(Dc)
+        Bdc = Rmat * Dc'
+        wr  = colsum(Bdc :* (RVRinv * Bdc))'
+
+        block  = ((1::Bc), ru, rr, wu, wr)
+        M      = M \ block
+        nblock = J(Bc, 1, compnames[c])
+        names  = names \ nblock
+    }
+
+    // Longest comparison name, for the string variable width.
+    mx = 1
+    for (i = 1; i <= rows(names); i++) mx = max((mx, strlen(names[i])))
+
+    stata("clear")
+    if (rows(M) == 0) return
+    st_addobs(rows(M))
+    (void) st_addvar("str" + strofreal(mx), "comparison")
+    (void) st_addvar("double", ("draw", "range_unc", "range_rc", "wald_unc", "wald_rc"))
+    st_sstore(., "comparison", names)
+    st_store(., ("draw", "range_unc", "range_rc", "wald_unc", "wald_rc"), M)
 }
 
 // Compute average per-spec sample size across bootstrap reps. Returns a

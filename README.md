@@ -33,16 +33,18 @@ discard
 ## Syntax
 
 ```
-robustness using DRAWSFILE, meta(METAFILE) comps(COMPSFILE) [alpha(numlist) maxdrop(#)]
+robustness using DRAWSFILE, meta(METAFILE) comps(COMPSFILE) [alpha(numlist) maxdrop(#) saving(filename[, replace])]
 ```
 
 It reads three files, all produced by your bootstrap-generation step:
 
-- **Draws file** (`using`): one row per bootstrap replication, with variables `rep coef1 se1 coef2 se2 ...`, one coef/se pair per specification in column order. Optional `n1 n2 ...` carry per-spec bootstrap sample sizes. The `se` columns are checked for presence but are not used by any statistic, which reads the `coef` columns only. Draws must be **uncentred**; all recentring happens inside the command.
+- **Draws file** (`using`): one row per bootstrap replication. The `coef1 coef2 ...` columns are required, one per specification in column order. Optional `rep`, per-spec `se1 se2 ...`, and per-spec `n1 n2 ...` columns may be present; the `se` columns are ignored (no statistic reads them — the Wald uses the bootstrap covariance of the `coef` draws), and `n`, if present for every spec, drives the average-n reporting in Panel A. Draws must be **uncentred**; all recentring happens inside the command.
 - **Metadata file** (`meta()`): one row per specification, variables `k label theta se`, with `theta` the full-sample estimate. `k` is **required**: it is the specification index, must list each specification exactly once over `1..K`, and the command sorts by it, so `k` fixes which metadata row maps to `coef`*k* / `se`*k* in the draws file. Optional `n` carries the full-sample size.
 - **Comparisons file** (`comps()`): one row per comparison, variables `comp_name` and `comp_cols`, where `comp_cols` is a space-separated list of 1-indexed column numbers. A specification may appear at most once in a comparison (duplicates are rejected). `comp_name` is used as an identifier in the output and in `r()`; any label is accepted, but one that is not a valid Stata name is converted with `strtoname` (for example, "All specs" becomes `All_specs`), and the conversion is reported.
 
 `alpha()` sets the significance levels for the equivalence bounds (default `0.50 0.05`); `maxdrop()` sets the maximum percentage of incomplete replications tolerated before the command aborts (default `1`).
+
+`saving(filename[, replace])` writes the per-replication bootstrap statistics — the distributions the reported summaries collapse to scalars — to a `.dta` for plotting. The file is long, one row per comparison-by-draw, with `comparison draw range_unc range_rc wald_unc wald_rc`. The `(1 - alpha)` quantile of `range_unc` is `R*`; `p_R` is the Monte Carlo p-value `(1 + #{range_rc >= observed range})/(B + 1)`. The data in memory are left untouched.
 
 ## Output
 
@@ -57,6 +59,15 @@ Full results, including the Wald statistics and any extra alphas, are returned i
 
 ```
 robustness using bsdraws.dta, meta(bsdraws_meta.dta) comps(bsdraws_comps.dta)
+```
+
+Save and plot the bootstrap range distribution — the object the "robustness" claim implicitly invokes — with the equivalence bounds marked:
+
+```
+robustness using bsdraws.dta, meta(bsdraws_meta.dta) comps(bsdraws_comps.dta) saving(rdist.dta, replace)
+matrix T = r(table)
+use rdist.dta, clear
+histogram range_unc if comparison=="main", xline(`=T["main","Rstar_50"]' `=T["main","Rstar_95"]')
 ```
 
 ## Generating the draws
