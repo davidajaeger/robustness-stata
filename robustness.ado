@@ -1,4 +1,4 @@
-*! version 1.3.0  Jaeger (2026)  Range Tests for Equality and Equivalence
+*! version 1.4.0  Jaeger (2026)  Range Tests for Equality and Equivalence
 *! robustness -- compute robustness statistics from saved bootstrap draws
 program define robustness, rclass
     version 16.1
@@ -408,6 +408,20 @@ real rowvector _rob_str2cols(string scalar s) {
     return(v)
 }
 
+// True if the symmetric PSD contrast covariance is numerically rank deficient,
+// so the Wald is undefined. A relative eigenvalue tolerance is used rather than
+// rank(), because a default rank tolerance can miss structured collinearity
+// (e.g. one specification a constant shift of another) whose true zero
+// eigenvalue floating-point rounding lifts to a tiny positive value. The gap is
+// wide in practice: full-rank cases sit near rcond ~ 1e-1, deficient ones near
+// 1e-16.
+real scalar _rob_rank_deficient(real matrix RVR) {
+    real rowvector ev
+    ev = symeigenvalues(RVR)
+    if (max(ev) <= 0) return(1)
+    return(min(ev) <= 1e-12 * max(ev))
+}
+
 // Per-comparison statistics. Reads the uncentred draws two ways: uncentred
 // for the equivalence bounds, recentred for the equality p-values. Returns a
 // 12-element column vector in the canonical r(table) order:
@@ -431,8 +445,8 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
                             real rowvector cols, real scalar maxdrop,
                             string scalar label) {
     real scalar    B, K, B_orig, dropped, dropshare, theta_bar, W_obs, R_obs
-    real scalar    p_R, p_W, ratio
-    real matrix    th, D, Rmat, RVRinv, Bd, Bdc, Dc
+    real scalar    p_R, p_W, ratio, Wstar_50, Wstar_95
+    real matrix    th, D, Rmat, RVR, RVRinv, Bd, Bdc, Dc
     real colvector R_unc, W_unc, R_rc, W_rc, out
 
     th = theta[cols', 1]            // K x 1 full-sample estimates
@@ -460,40 +474,50 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
         exit(error(2001))
     }
 
-    // Grand-mean contrast (K-1 x K) and the bootstrap covariance of the K
-    // estimates. RVRinv weights the Wald; the covariance carries the
-    // cross-specification dependence the shared resample induces.
-    Rmat   = _rob_contrast(K)
-    RVRinv = invsym(Rmat * variance(D) * Rmat')
+    // Grand-mean contrast and the bootstrap covariance of the K contrasts.
+    Rmat = _rob_contrast(K)
+    RVR  = Rmat * variance(D) * Rmat'
 
-    // Observed statistics, from the full-sample estimates.
     theta_bar = mean(th)
-    R_obs     = max(th) - min(th)
-    W_obs     = ((Rmat*th)' * RVRinv * (Rmat*th))[1,1]
 
-    // Uncentred bootstrap range and Wald, one per replication. These feed
-    // the equivalence bounds.
+    // RANGE statistics. These never use the contrast covariance, so they are
+    // always defined.
+    R_obs = max(th) - min(th)
     R_unc = rowmax(D) :- rowmin(D)
-    Bd    = Rmat * D'
-    W_unc = colsum(Bd :* (RVRinv * Bd))'
-
-    // Recentred draws: subtract each spec's deviation from the cross-spec
-    // mean (theta_hat_k - theta_bar), imposing Delta = 0. The common
-    // +theta_bar shift cancels in the range and in the contrast, so it does
-    // not affect p_R or p_W; it is kept to mirror the paper's definition.
+    // Recentred draws: subtract each spec's deviation from the cross-spec mean
+    // (theta_hat_k - theta_bar), imposing Delta = 0. The common +theta_bar
+    // shift cancels in the range and in the contrast, so it does not affect the
+    // p-value; it is kept to mirror the paper's definition.
     Dc    = D :- th' :+ theta_bar
     R_rc  = rowmax(Dc) :- rowmin(Dc)
-    Bdc   = Rmat * Dc'
-    W_rc  = colsum(Bdc :* (RVRinv * Bdc))'
+    p_R   = (1 + sum(R_rc :>= R_obs)) / (B + 1)
 
-    // Equality p-values, Monte Carlo form (1 + #)/(B + 1): the observed
-    // statistic joins its own reference set, so the p-value is bounded away
-    // from zero (minimum 1/(B+1)) and is uniform under the null by
-    // exchangeability (Davison and Hinkley 1997). B is the complete-rep count.
-    p_R = (1 + sum(R_rc :>= R_obs)) / (B + 1)
-    p_W = (1 + sum(W_rc :>= W_obs)) / (B + 1)
+    // WALD statistics. They require a full-rank contrast covariance. Duplicate
+    // columns are rejected at parse time, so a singular RVR here means the
+    // specifications are genuinely collinear in the bootstrap draws. Rather
+    // than invert with a generalized inverse (which would return a degenerate
+    // Wald), report W, p_W, and W* as missing and keep the range results.
+    if (_rob_rank_deficient(RVR)) {
+        W_obs = .; p_W = .; Wstar_50 = .; Wstar_95 = .
+        printf("\n%s: contrast covariance is rank deficient (collinear specifications).\n", label)
+        printf("  Wald statistics (W, p_W, W*) set to missing; range statistics (R, p_R, R*) are unaffected.\n")
+    }
+    else {
+        RVRinv   = invsym(RVR)
+        W_obs    = ((Rmat*th)' * RVRinv * (Rmat*th))[1,1]
+        Bd       = Rmat * D'
+        W_unc    = colsum(Bd :* (RVRinv * Bd))'
+        Bdc      = Rmat * Dc'
+        W_rc     = colsum(Bdc :* (RVRinv * Bdc))'
+        // Monte Carlo p-value (1 + #)/(B + 1): the observed statistic joins its
+        // own reference set, so it is bounded away from zero and uniform under
+        // the null by exchangeability (Davison and Hinkley 1997).
+        p_W      = (1 + sum(W_rc :>= W_obs)) / (B + 1)
+        Wstar_50 = sqrt(_rob_quantile(W_unc, 0.50))
+        Wstar_95 = sqrt(_rob_quantile(W_unc, 0.95))
+    }
 
-    // Robustness ratio uses R*_{.95}.
+    // Robustness ratio uses R*_{.95} (range-based, always defined).
     if (abs(theta_bar) > 0) ratio = _rob_quantile(R_unc, 0.95) / abs(theta_bar)
     else                    ratio = .
 
@@ -505,8 +529,8 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
     out[ 5]  = p_W
     out[ 6]  = _rob_quantile(R_unc, 0.50)          // R*_{.50}
     out[ 7]  = _rob_quantile(R_unc, 0.95)          // R*_{.95}
-    out[ 8]  = sqrt(_rob_quantile(W_unc, 0.50))    // W*_{.50}
-    out[ 9]  = sqrt(_rob_quantile(W_unc, 0.95))    // W*_{.95}
+    out[ 8]  = Wstar_50                            // W*_{.50}
+    out[ 9]  = Wstar_95                            // W*_{.95}
     out[10]  = ratio
     out[11]  = K
     out[12]  = dropped
@@ -525,7 +549,7 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
 // st_data (not a view), then clears memory and rebuilds it as the output
 // dataset; the caller saves it and restores the user's data.
 void _rob_save_draws() {
-    real matrix      theta, DRAWS, D, Dc, Rmat, RVRinv, Bd, Bdc, M, block
+    real matrix      theta, DRAWS, D, Dc, Rmat, RVR, RVRinv, Bd, Bdc, M, block
     real colvector   keeprows, ru, rr, wu, wr, th
     real rowvector   cols
     real scalar      nc, c, K, Bc, theta_bar, mx, i
@@ -553,17 +577,26 @@ void _rob_save_draws() {
         K        = cols(D)
 
         Rmat      = _rob_contrast(K)
-        RVRinv    = invsym(Rmat * variance(D) * Rmat')
+        RVR       = Rmat * variance(D) * Rmat'
         theta_bar = mean(th)
 
         ru  = rowmax(D) :- rowmin(D)
-        Bd  = Rmat * D'
-        wu  = colsum(Bd :* (RVRinv * Bd))'
-
         Dc  = D :- th' :+ theta_bar
         rr  = rowmax(Dc) :- rowmin(Dc)
-        Bdc = Rmat * Dc'
-        wr  = colsum(Bdc :* (RVRinv * Bdc))'
+
+        // Wald columns only when the contrast covariance is full rank; under
+        // rank deficiency they are written missing, matching W/p_W/W*.
+        if (!_rob_rank_deficient(RVR)) {
+            RVRinv = invsym(RVR)
+            Bd     = Rmat * D'
+            wu     = colsum(Bd :* (RVRinv * Bd))'
+            Bdc    = Rmat * Dc'
+            wr     = colsum(Bdc :* (RVRinv * Bdc))'
+        }
+        else {
+            wu = J(Bc, 1, .)
+            wr = J(Bc, 1, .)
+        }
 
         block  = ((1::Bc), ru, rr, wu, wr)
         M      = M \ block
@@ -790,8 +823,8 @@ real matrix _rob_compute_extras(real matrix theta, real matrix DRAWS,
                                 string scalar comparisons,
                                 string scalar comp_prefix,
                                 string scalar extralist) {
-    real scalar      nc, c, na, a, K, alpha
-    real matrix      D, Rmat, RVRinv, Bd, out_extra
+    real scalar      nc, c, na, a, K, alpha, wald_ok
+    real matrix      D, Rmat, RVR, RVRinv, Bd, out_extra
     real colvector   R_unc, W_unc
     real rowvector   cols
     string rowvector compnames, alphas
@@ -807,14 +840,22 @@ real matrix _rob_compute_extras(real matrix theta, real matrix DRAWS,
         D      = select(DRAWS[., cols], rowmissing(DRAWS[., cols]) :== 0)
         K      = cols(D)
         Rmat   = _rob_contrast(K)
-        RVRinv = invsym(Rmat * variance(D) * Rmat')
+        RVR    = Rmat * variance(D) * Rmat'
         R_unc  = rowmax(D) :- rowmin(D)
-        Bd     = Rmat * D'
-        W_unc  = colsum(Bd :* (RVRinv * Bd))'
+        // Wald bounds only when the contrast covariance is full rank; otherwise
+        // the Wstar columns stay missing (out_extra is initialized to .).
+        wald_ok = !_rob_rank_deficient(RVR)
+        if (wald_ok) {
+            RVRinv = invsym(RVR)
+            Bd     = Rmat * D'
+            W_unc  = colsum(Bd :* (RVRinv * Bd))'
+        }
         for (a=1; a<=na; a++) {
             alpha = strtoreal(alphas[a])
-            out_extra[c, 2*(a-1) + 1] =      _rob_quantile(R_unc, 1 - alpha)
-            out_extra[c, 2*(a-1) + 2] = sqrt(_rob_quantile(W_unc, 1 - alpha))
+            out_extra[c, 2*(a-1) + 1] = _rob_quantile(R_unc, 1 - alpha)
+            if (wald_ok) {
+                out_extra[c, 2*(a-1) + 2] = sqrt(_rob_quantile(W_unc, 1 - alpha))
+            }
         }
     }
     return(out_extra)

@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.3.0  Jaeger (2026)}{...}
+{* *! version 1.4.0  Jaeger (2026)}{...}
 {viewerjumpto "Syntax" "robustness##syntax"}{...}
 {viewerjumpto "Description" "robustness##description"}{...}
 {viewerjumpto "Options" "robustness##options"}{...}
@@ -119,6 +119,14 @@ within each comparison after dropping incomplete replications, so the same
 Specify {cmd:replace} to overwrite an existing file. The data in memory are
 left untouched. See the examples below for plotting.
 
+{pstd}
+When marking {cmd:R*} on a plot of the saved draws, read the bound from
+{cmd:r(table)} rather than recomputing a quantile from the saved series.
+{cmd:R*} is a type-1 order statistic (no interpolation), whereas
+{cmd:summarize, detail} and most quantile routines interpolate, so a line
+computed that way can sit a fraction off the reported bound. The plotting
+examples below take the bound from {cmd:r(table)} for exactly this reason.
+
 {marker inputs}{...}
 {title:Input files}
 
@@ -179,6 +187,16 @@ independently per specification destroys the joint distribution across
 specifications and produces wrong p_R and R* with no error and no
 warning. The guarantee must be enforced in the generation step. The
 generation examples accompanying Jaeger (2026) enforce and teach it.
+
+{pstd}
+The Wald statistics require a full-rank contrast covariance. When the
+specifications are collinear in the bootstrap draws (for example one is a fixed
+shift or a linear combination of others) that covariance is singular, and the
+command reports {cmd:W}, {cmd:p_W}, and {cmd:W*} as missing with a warning
+rather than inverting it with a generalized inverse. The range statistics
+({cmd:R}, {cmd:p_R}, {cmd:R*}) do not use the contrast covariance and are
+reported normally. Exact duplicate columns are a separate case and are rejected
+when the draws are read.
 
 {marker examples}{...}
 {title:Examples}
