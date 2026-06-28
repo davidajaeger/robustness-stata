@@ -493,10 +493,11 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
     p_R   = (1 + sum(R_rc :>= R_obs)) / (B + 1)
 
     // WALD statistics. They require a full-rank contrast covariance. Duplicate
-    // columns are rejected at parse time, so a singular RVR here means the
-    // specifications are genuinely collinear in the bootstrap draws. Rather
-    // than invert with a generalized inverse (which would return a degenerate
-    // Wald), report W, p_W, and W* as missing and keep the range results.
+    // specification references within a comparison are rejected at parse time;
+    // a singular RVR here therefore means distinct specifications are
+    // collinear in the bootstrap draws. Rather than invert with a generalized
+    // inverse (which would return a degenerate Wald), report W, p_W, and W*
+    // as missing and keep the range results.
     if (_rob_rank_deficient(RVR)) {
         W_obs = .; p_W = .; Wstar_50 = .; Wstar_95 = .
         printf("\n%s: contrast covariance is rank deficient (collinear specifications).\n", label)

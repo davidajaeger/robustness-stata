@@ -190,14 +190,15 @@ warning. The guarantee must be enforced in the generation step. The
 generation examples accompanying Jaeger (2026) enforce and teach it.
 
 {pstd}
-The Wald statistics require a full-rank contrast covariance. When the
+The Wald statistics require a full-rank contrast covariance. If distinct
 specifications are collinear in the bootstrap draws (for example one is a fixed
 shift or a linear combination of others) that covariance is singular, and the
 command reports {cmd:W}, {cmd:p_W}, and {cmd:W*} as missing with a warning
 rather than inverting it with a generalized inverse. The range statistics
 ({cmd:R}, {cmd:p_R}, {cmd:R*}) do not use the contrast covariance and are
-reported normally. Exact duplicate columns are a separate case and are rejected
-when the draws are read.
+reported normally. Duplicate specification references within a comparison
+(such as {cmd:comp_cols = "1 1 2"}) are a separate case, rejected when the
+comparisons file is read.
 
 {marker examples}{...}
 {title:Examples}
