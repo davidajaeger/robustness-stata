@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.4.0  Jaeger (2026)}{...}
+{* *! version 1.4.1  Jaeger (2026)}{...}
 {viewerjumpto "Syntax" "robustness##syntax"}{...}
 {viewerjumpto "Description" "robustness##description"}{...}
 {viewerjumpto "Options" "robustness##options"}{...}
