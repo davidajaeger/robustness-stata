@@ -1,4 +1,4 @@
-*! version 1.4.0  Jaeger (2026)  Range Tests for Equality and Equivalence
+*! version 1.4.1  Jaeger (2026)  Range Tests for Equality and Equivalence
 *! robustness -- compute robustness statistics from saved bootstrap draws
 program define robustness, rclass
     version 16.1
@@ -760,7 +760,7 @@ void _rob_print_panel_b(string rowvector cnames, real matrix results,
         K_c       = results[11, c]
 
         if (ratio < .) ratio_str = sprintf("%10.4f", ratio)
-        else           ratio_str = "       inf"
+        else           ratio_str = "         ."
 
         printf("  %s", _rob_lpad(cn, labw))
         printf(" %3.0f   %9.5f   %9.5f   %9.5f   %9.5f  %7.4f       %s\n",

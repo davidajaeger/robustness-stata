@@ -84,16 +84,17 @@ without disturbing the user's data.
 {opth comps(filename)} names the comparisons file. Required.
 
 {phang}
-{opth alpha(numlist)} sets the significance levels for the equivalence
-margins. Each value must be strictly between 0 and 1. The default is
-{cmd:alpha(0.50 0.05)}, matching Panel B in Jaeger (2026): the median bound
-R*(.50) (a point estimate of Delta) and the 95th-percentile upper bound
-R*(.95). Panel B always reports these two columns. If the user supplies
-additional alphas, those are computed for every comparison and returned in
-the matrix {cmd:r(extra)}, with columns {cmd:Rstar_}{it:XX} and
-{cmd:Wstar_}{it:XX} for each extra alpha (where {it:XX} is the quantile level
-1-alpha as two digits; for example, alpha=0.10 -> {cmd:Rstar_90}). The
-additional bounds are not added to Panel B's printed output.
+{opth alpha(numlist)} controls the equivalence-bound computation. Panel B
+always reports R*(.50) and R*(.95), matching the reporting convention of
+Jaeger (2026); these two columns are not user-tunable. The {opt alpha()}
+option lets you compute additional equivalence bounds at other significance
+levels. The additional bounds are returned in the matrix {cmd:r(extra)} for
+every comparison, with columns {cmd:Rstar_}{it:XX} and {cmd:Wstar_}{it:XX}
+for each extra alpha (where {it:XX} is the quantile level 1-alpha as two
+digits; for example, alpha=0.10 -> {cmd:Rstar_90}). The additional bounds
+are not added to Panel B's printed output. If {opt alpha()} is not supplied,
+only the default .50 and .05 are computed. Each value must be strictly
+between 0 and 1.
 
 {phang}
 {opt maxdrop(#)} sets the maximum percentage of bootstrap replications that
