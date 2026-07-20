@@ -1,4 +1,4 @@
-*! version 1.5.0  Jaeger (2026)  Range Tests for Equality and Equivalence
+*! version 1.5.1  Jaeger (2026)  Range Tests for Equality and Equivalence
 *! robustness -- compute robustness statistics from saved bootstrap draws
 program define robustness, rclass
     version 16.1
@@ -682,8 +682,8 @@ void _rob_print_panel_a(string rowvector labels, real matrix theta_hat,
 
     // Column widths matching the data-row format specs.
     real scalar w_theta, w_se, w_n
-    w_theta = 12         // %12.5f
-    w_se    = 8          // %8.5f
+    w_theta = 12         // %12.4f
+    w_se    = 8          // %8.4f
     w_n     = 10         // %10.0f
 
     K = rows(theta_hat)
@@ -710,7 +710,7 @@ void _rob_print_panel_a(string rowvector labels, real matrix theta_hat,
 
     for (k=1; k<=K; k++) {
         printf("  %s", _rob_lpad(labels[k], labw))
-        printf("%12.5f  %8.5f", theta_hat[k, 1], se_hat[k, 1])
+        printf("%12.4f  %8.4f", theta_hat[k, 1], se_hat[k, 1])
         if (has_n_full) printf("    %10.0f", n_full[k, 1])
         if (has_n_boot) printf("    %10.0f", n_boot_all[k])
         printf("\n")
@@ -732,10 +732,10 @@ void _rob_print_panel_b(string rowvector cnames, real matrix results,
     // Column widths matching the data-row format specs.
     real scalar w_K, w_theta, w_R, w_d50, w_d05, w_pR, w_ratio
     w_K     = 3          // %3.0f
-    w_theta = 9          // %9.5f
-    w_R     = 9          // %9.5f
-    w_d50   = 9          // %9.5f
-    w_d05   = 9          // %9.5f
+    w_theta = 9          // %9.4f
+    w_R     = 9          // %9.4f
+    w_d50   = 9          // %9.4f
+    w_d05   = 9          // %9.4f
     w_pR    = 7          // %7.4f
     w_ratio = 10         // %10.4f
 
@@ -774,7 +774,7 @@ void _rob_print_panel_b(string rowvector cnames, real matrix results,
         else           ratio_str = "         ."
 
         printf("  %s", _rob_lpad(cn, labw))
-        printf(" %3.0f   %9.5f   %9.5f   %9.5f   %9.5f  %7.4f       %s\n",
+        printf(" %3.0f   %9.4f   %9.4f   %9.4f   %9.4f  %7.4f       %s\n",
                K_c, theta_bar, R_obs, dR50, dR05, pR, ratio_str)
     }
 }
@@ -908,7 +908,7 @@ void _rob_print_tau(string rowvector cnames, real matrix results,
     if (labw < 16) labw = 16
 
     printf("\n%s\n", "-"*divwidth)
-    printf("  Equivalence at pre-specified tolerance  tau = %9.5f\n", tau)
+    printf("  Equivalence at pre-specified tolerance  tau = %9.4f\n", tau)
     printf("%s\n", "-"*divwidth)
     header = "  " + _rob_rpad("Comparison set", labw)
     header = header + _rob_rpad("R*(.95)", 12)
@@ -920,7 +920,7 @@ void _rob_print_tau(string rowvector cnames, real matrix results,
         ptau = results[13, c]
         printf("  %s%s%s\n",
                _rob_rpad(cn, labw),
-               _rob_rpad(sprintf("%9.5f", R05), 12),
+               _rob_rpad(sprintf("%9.4f", R05), 12),
                _rob_rpad(sprintf("%7.4f", ptau), 10))
     }
     printf("  Note: the level-alpha equivalence test rejects H0: Delta >= tau when\n")
