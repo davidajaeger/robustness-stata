@@ -1,4 +1,4 @@
-*! version 1.4.1  Jaeger (2026)  Range Tests for Equality and Equivalence
+*! version 1.5.0  Jaeger (2026)  Range Tests for Equality and Equivalence
 *! robustness -- compute robustness statistics from saved bootstrap draws
 program define robustness, rclass
     version 16.1
@@ -53,7 +53,7 @@ program define robustness, rclass
     =======================================================================*/
 
     syntax using/, Meta(string) Comps(string) ///
-        [ Alpha(numlist >0 <1 sort) MAXDrop(real 1) SAVing(string) ]
+        [ Alpha(numlist >0 <1 sort) tau(numlist max=1 >0) MAXDrop(real 1) SAVing(string) ]
 
     * The Panel B layout in Jaeger (2026) reports R* at alpha = .50 and .05
     * (that is, R*_{.50} and R*_{.95}). Those two are always computed and
@@ -353,6 +353,7 @@ program define robustness, rclass
     return scalar ncomps = `ncomps'
     return scalar nspecs = `nspecs'
     return scalar B      = `B'
+    if "`tau'" != "" return scalar tau = `tau'
 
     * Matrix returns: the engine staged these as named Stata matrices.
     * Surface them through return matrix, then drop the staging matrices.
@@ -424,7 +425,7 @@ real scalar _rob_rank_deficient(real matrix RVR) {
 
 // Per-comparison statistics. Reads the uncentred draws two ways: uncentred
 // for the equivalence bounds, recentred for the equality p-values. Returns a
-// 12-element column vector in the canonical r(table) order:
+// 13-element column vector in the canonical r(table) order:
 //
 //   1  theta_bar   mean of the estimates in the comparison
 //   2  R           observed range, max(theta) - min(theta)
@@ -438,14 +439,15 @@ real scalar _rob_rank_deficient(real matrix RVR) {
 //   10 ratio       Rstar_95 / |theta_bar| (missing if theta_bar == 0)
 //   11 K           number of specifications in the comparison
 //   12 dropped     incomplete bootstrap replications for this comparison
+//   13 p_tau       equivalence p-value at tolerance tau (missing if tau unset)
 //
 // Aborts if too few complete replications remain or the dropped share
 // exceeds maxdrop.
 real colvector _rob_compute(real matrix theta, real matrix DRAWS,
                             real rowvector cols, real scalar maxdrop,
-                            string scalar label) {
+                            string scalar label, real scalar tau) {
     real scalar    B, K, B_orig, dropped, dropshare, theta_bar, W_obs, R_obs
-    real scalar    p_R, p_W, ratio, Wstar_50, Wstar_95
+    real scalar    p_R, p_W, ratio, Wstar_50, Wstar_95, p_tau
     real matrix    th, D, Rmat, RVR, RVRinv, Bd, Bdc, Dc
     real colvector R_unc, W_unc, R_rc, W_rc, out
 
@@ -522,7 +524,14 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
     if (abs(theta_bar) > 0) ratio = _rob_quantile(R_unc, 0.95) / abs(theta_bar)
     else                    ratio = .
 
-    out      = J(12, 1, .)
+    // Equivalence p-value at a pre-specified tolerance tau (when supplied): the
+    // add-one share of UNCENTRED bootstrap ranges at or above tau, the same
+    // >= convention as p_R. By the duality lemma p_tau <= alpha iff
+    // R*_{1-alpha} <= tau; no new resampling, a second reading of R_unc.
+    if (tau < .) p_tau = (1 + sum(R_unc :>= tau)) / (B + 1)
+    else         p_tau = .
+
+    out      = J(13, 1, .)
     out[ 1]  = theta_bar
     out[ 2]  = R_obs
     out[ 3]  = p_R
@@ -535,6 +544,7 @@ real colvector _rob_compute(real matrix theta, real matrix DRAWS,
     out[10]  = ratio
     out[11]  = K
     out[12]  = dropped
+    out[13]  = p_tau
     return(out)
 }
 
@@ -882,11 +892,46 @@ string rowvector _rob_extras_colnames(string scalar extralist) {
 }
 
 // Driver: pulls locals set by the ado, runs every comparison.
+// Equivalence at a pre-specified tolerance tau. Printed only when tau() is
+// given. One line per comparison: R*(.95), the equivalence p-value p_tau, and
+// whether H0: Delta >= tau rejects at the .05 level (equivalently, by the
+// duality lemma, R*(.95) <= tau).
+void _rob_print_tau(string rowvector cnames, real matrix results,
+                    real scalar tau, real scalar divwidth) {
+    real scalar    nc, c, labw, R05, ptau
+    string scalar  cn, header
+
+    nc   = cols(cnames)
+    labw = strlen("Comparison set")
+    for (c=1; c<=nc; c++) if (strlen(cnames[c]) > labw) labw = strlen(cnames[c])
+    labw = labw + 2
+    if (labw < 16) labw = 16
+
+    printf("\n%s\n", "-"*divwidth)
+    printf("  Equivalence at pre-specified tolerance  tau = %9.5f\n", tau)
+    printf("%s\n", "-"*divwidth)
+    header = "  " + _rob_rpad("Comparison set", labw)
+    header = header + _rob_rpad("R*(.95)", 12)
+    header = header + _rob_rpad("p_tau", 10)
+    printf("%s\n", header)
+    for (c=1; c<=nc; c++) {
+        cn   = cnames[c]
+        R05  = results[7, c]
+        ptau = results[13, c]
+        printf("  %s%s%s\n",
+               _rob_rpad(cn, labw),
+               _rob_rpad(sprintf("%9.5f", R05), 12),
+               _rob_rpad(sprintf("%7.4f", ptau), 10))
+    }
+    printf("  Note: the level-alpha equivalence test rejects H0: Delta >= tau when\n")
+    printf("        p_tau <= alpha; equivalently R*(1-alpha) <= tau (Jaeger 2026).\n")
+}
+
 void _robustness_engine() {
     real matrix      DRAWS, theta, se_hat, n_full, N, results
     string scalar    alphalist, compname, compspec, nvars
     string rowvector comps, labels
-    real scalar      c, maxdrop, has_n_boot, has_n_full, nspecs, B, k, maxlab
+    real scalar      c, maxdrop, has_n_boot, has_n_full, nspecs, B, k, maxlab, tau
     real colvector   n_boot_avg, comp_stats, col_k
 
     st_view(DRAWS=., ., tokens(st_local("coef_vars")))
@@ -895,6 +940,7 @@ void _robustness_engine() {
     n_full    = st_matrix("n_full_hat")
     alphalist = st_local("alpha")
     maxdrop   = strtoreal(st_local("maxdrop")) / 100
+    tau       = strtoreal(st_local("tau"))    // empty -> . (unset)
     nspecs    = rows(theta)
     B         = rows(DRAWS)
 
@@ -951,15 +997,15 @@ void _robustness_engine() {
     // Ncomps columns internally (for efficient column access during
     // printing). Column order matches _rob_compute's documented layout.
     comps = tokens(st_local("comparisons"))
-    results = J(12, cols(comps), .)
+    results = J(13, cols(comps), .)
     maxlab_b = strlen("Comparison set")  // min header width
     for (c=1; c<=cols(comps); c++) {
         compname = comps[1, c]
         if (strlen(compname) > maxlab_b) maxlab_b = strlen(compname)
         compspec = st_local("comp_" + compname)
         comp_stats = _rob_compute(theta, DRAWS, _rob_str2cols(compspec),
-                                  maxdrop, compname)
-        for (k=1; k<=12; k++) results[k, c] = comp_stats[k]
+                                  maxdrop, compname, tau)
+        for (k=1; k<=13; k++) results[k, c] = comp_stats[k]
     }
     labw_b = maxlab_b + 2
     if (labw_b < 16) labw_b = 16
@@ -975,6 +1021,7 @@ void _robustness_engine() {
 
     // Panel B printing.
     _rob_print_panel_b(comps, results, maxlab_b, divwidth)
+    if (tau < .) _rob_print_tau(comps, results, tau, divwidth)
     _rob_print_drop_notes(comps, results, B)
     if (has_n_boot) _rob_print_n_note(N, comps, "comp_")
     printf("  Note: the robustness ratio is R*(.95)/|theta_bar|. When |theta_bar| is close to zero,\n")
@@ -1000,8 +1047,8 @@ void _robustness_engine() {
     st_matrixrowstripe("__rob_table", (J(cols(comps), 1, ""), comps'))
     table_colnames = ("theta_bar", "R", "p_R", "W", "p_W",
                       "Rstar_50", "Rstar_95", "Wstar_50", "Wstar_95",
-                      "ratio", "K", "dropped")
-    st_matrixcolstripe("__rob_table", (J(12, 1, ""), table_colnames'))
+                      "ratio", "K", "dropped", "p_tau")
+    st_matrixcolstripe("__rob_table", (J(13, 1, ""), table_colnames'))
 
     // __rob_extra: only if extras requested.
     if (st_local("extra_alphas") != "") {

@@ -39,6 +39,8 @@ specifications, from saved bootstrap draws
 Default {cmd:alpha(0.50 0.05)}, matching Panel B in the paper. Additional
 alphas are computed for every comparison and returned in {cmd:r(extra)} but are
 not added to Panel B{p_end}
+{synopt :{opt tau(#)}}pre-specified equivalence tolerance {it:#} > 0. When given,
+each comparison reports {cmd:p_tau}, the equivalence p-value at {cmd:tau}{p_end}
 {synopt :{opt maxd:rop(#)}}maximum percent of incomplete replications before
 aborting. Default {cmd:maxdrop(1)}{p_end}
 {synopt :{opt sav:ing(filename[, replace])}}save the per-replication bootstrap
@@ -104,6 +106,18 @@ specification failed to converge on that resample. Incomplete replications
 are dropped and counted. If the dropped share exceeds {opt maxdrop()} the
 command stops, because the surviving draws may no longer represent the
 intended distribution. The default is {cmd:1}.
+
+{pstd}
+{opt tau(#)} supplies a pre-specified equivalence tolerance {it:#} > 0, the
+largest disagreement across specifications judged consistent with robustness.
+When {opt tau()} is given, each comparison reports {cmd:p_tau}, the equivalence
+p-value at that tolerance: the add-one share of uncentred bootstrap ranges at or
+above {it:#}, the same convention as {cmd:p_R}. By the duality of Jaeger (2026),
+{cmd:p_tau} is at or below {it:alpha} exactly when {cmd:R*}(1-{it:alpha}) is at
+or below {it:#}, so the tolerance test and the reported bound {cmd:Rstar_95} are
+two readings of one object. {cmd:p_tau} is added to {cmd:r(table)} and printed
+below Panel B, and the tolerance is stored in {cmd:r(tau)}. Omit {opt tau()} to
+leave {cmd:p_tau} missing.
 
 {pstd}
 {opt saving(filename[, replace])} writes the per-replication bootstrap
@@ -234,6 +248,7 @@ the observed range marked. The mass at or beyond the line is {cmd:p_R}.{p_end}
 {synopt:{cmd:r(nspecs)}}number of specifications K{p_end}
 {synopt:{cmd:r(ncomps)}}number of comparisons{p_end}
 {synopt:{cmd:r(B)}}number of bootstrap replications{p_end}
+{synopt:{cmd:r(tau)}}equivalence tolerance, present only when {cmd:tau()} is specified{p_end}
 
 {synoptset 16 tabbed}{...}
 {p2col 5 16 20 2: Macros}{p_end}
@@ -244,10 +259,11 @@ the observed range marked. The mass at or beyond the line is {cmd:p_R}.{p_end}
 {synopt:{cmd:r(specs)}}Nspecs x 4 matrix of Panel A data. Rows are the spec
 labels from the metadata; columns are {cmd:theta}, {cmd:se}, {cmd:n_full},
 {cmd:n_boot}{p_end}
-{synopt:{cmd:r(table)}}Ncomps x 12 matrix of Panel B data. Rows are the
+{synopt:{cmd:r(table)}}Ncomps x 13 matrix of Panel B data. Rows are the
 comparison names; columns are {cmd:theta_bar}, {cmd:R}, {cmd:p_R}, {cmd:W},
 {cmd:p_W}, {cmd:Rstar_50}, {cmd:Rstar_95}, {cmd:Wstar_50},
-{cmd:Wstar_95}, {cmd:ratio}, {cmd:K}, {cmd:dropped}{p_end}
+{cmd:Wstar_95}, {cmd:ratio}, {cmd:K}, {cmd:dropped}, {cmd:p_tau}. The
+{cmd:p_tau} column is missing unless {cmd:tau()} is specified{p_end}
 {synopt:{cmd:r(extra)}}Ncomps x (2 * n_extras) matrix, present only when
 {cmd:alpha()} requests significance levels beyond .50 and .05. Rows are the
 comparison names; columns are {cmd:Rstar_}{it:XX} and

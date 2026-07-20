@@ -5,6 +5,8 @@ d Jaeger (2026), "Robustness? Range Tests for Equality and Equivalence
 d Across Specifications." Computes, from saved bootstrap draws, the
 d observed range, equality test p-values (p_R and p_W), and equivalence
 d bounds R*(1-alpha) and W*(1-alpha) for one or more comparison sets.
+d With a pre-specified tolerance via tau(), also reports the equivalence
+d p-value p_tau for each comparison set.
 d Stata counterpart of the R package 'robustness'; given the same draws
 d the two agree.
 d

@@ -10,6 +10,7 @@ Applied work routinely presents several specifications of the same coefficient a
 - **`R*(.50)`:** the median of the uncentred bootstrap range distribution.
 - **`p_R` (the range-based equality test):** the bootstrap p-value for the null that the specifications share a common probability limit.
 - the robustness ratio `R*(.95)/|theta_bar|`.
+- **`p_tau` (the equivalence test at a pre-specified tolerance), when `tau()` is given:** the bootstrap p-value for the null that the disagreement across specifications is at least `tau` -- the largest disagreement you would still call robust. It is the add-one share of uncentred bootstrap ranges at or above `tau`, and by the duality in the paper `p_tau <= alpha` exactly when `R*(1-alpha) <= tau`.
 
 The Wald statistic, its bootstrap p-value, and the Wald-based bound (`W*`) are also computed and returned in `r()`. The Wald requires a full-rank contrast covariance. If distinct specifications are collinear in the bootstrap draws (for example one is a fixed shift or a linear combination of others) that covariance is singular, and `W`, `p_W`, and `W*` are returned as missing with a warning rather than computed with a generalized inverse. The range statistics (`R`, `p_R`, `R*`) do not use the contrast covariance and are unaffected. Duplicate specification references within a comparison (such as `comp_cols = "1 1 2"`) are a separate case, rejected when the comparisons file is read.
 
@@ -33,7 +34,7 @@ discard
 ## Syntax
 
 ```
-robustness using DRAWSFILE, meta(METAFILE) comps(COMPSFILE) [alpha(numlist) maxdrop(#) saving(filename[, replace])]
+robustness using DRAWSFILE, meta(METAFILE) comps(COMPSFILE) [alpha(numlist) tau(#) maxdrop(#) saving(filename[, replace])]
 ```
 
 It reads three files, all produced by your bootstrap-generation step:
@@ -42,7 +43,7 @@ It reads three files, all produced by your bootstrap-generation step:
 - **Metadata file** (`meta()`): one row per specification, variables `k label theta se`, with `theta` the full-sample estimate. `k` is **required**: it is the specification index, must list each specification exactly once over `1..K`, and the command sorts by it, so `k` fixes which metadata row maps to `coef`*k* / `se`*k* in the draws file. Optional `n` carries the full-sample size.
 - **Comparisons file** (`comps()`): one row per comparison, variables `comp_name` and `comp_cols`, where `comp_cols` is a space-separated list of 1-indexed column numbers. A specification may appear at most once in a comparison (duplicates are rejected). `comp_name` is used as an identifier in the output and in `r()`; any label is accepted, but one that is not a valid Stata name is converted with `strtoname` (for example, "All specs" becomes `All_specs`), and the conversion is reported.
 
-`alpha()` sets the significance levels for the equivalence bounds (default `0.50 0.05`); `maxdrop()` sets the maximum percentage of incomplete replications tolerated before the command aborts (default `1`).
+`alpha()` sets the significance levels for the equivalence bounds (default `0.50 0.05`); `tau(#)` supplies a pre-specified equivalence tolerance (a positive number) and, when given, reports `p_tau` for each comparison and stores the tolerance in `r(tau)`; `maxdrop()` sets the maximum percentage of incomplete replications tolerated before the command aborts (default `1`).
 
 `saving(filename[, replace])` writes the per-replication bootstrap statistics — the distributions the reported summaries collapse to scalars — to a `.dta` for plotting. The file is long, one row per comparison-by-draw, with `comparison draw range_unc range_rc wald_unc wald_rc`. The `(1 - alpha)` quantile of `range_unc` is `R*`; `p_R` is the Monte Carlo p-value `(1 + #{range_rc >= observed range})/(B + 1)`. The data in memory are left untouched.
 
@@ -53,7 +54,7 @@ Two panels matching the paper's reporting convention:
 - **Panel A** — one row per specification: full-sample estimate, standard error, full-sample n, bootstrap-average n.
 - **Panel B** — one row per comparison: `K`, mean estimate, observed range, `R*(.50)`, `R*(.95)`, `p_R`, and the robustness ratio.
 
-Full results, including the Wald statistics and any extra alphas, are returned in `r(table)`, `r(specs)`, and `r(extra)`. The equivalence-bound columns are named `Rstar_50`, `Rstar_95` (and `Wstar_50`, `Wstar_95`), where the suffix is the quantile level `1 - alpha`. See `help robustness`.
+Full results, including the Wald statistics and any extra alphas, are returned in `r(table)`, `r(specs)`, and `r(extra)`. The equivalence-bound columns are named `Rstar_50`, `Rstar_95` (and `Wstar_50`, `Wstar_95`), where the suffix is the quantile level `1 - alpha`. When `tau()` is supplied, a `p_tau` column is added to `r(table)` (missing otherwise) and an equivalence block is printed below Panel B. See `help robustness`.
 
 ## Example
 
