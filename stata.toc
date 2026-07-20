@@ -4,6 +4,8 @@ d
 d Jaeger (2026), "Robustness? Range Tests for Equality and Equivalence
 d Across Specifications." Computes range-based and Wald-based tests of
 d equality and equivalence across specifications from saved bootstrap draws.
+d With a pre-specified tolerance via tau(), also reports the equivalence
+d p-value p_tau for each comparison set.
 d
 d Author: David A. Jaeger, University of St Andrews
 d
