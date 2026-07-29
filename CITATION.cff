@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "This software implements the method of Jaeger (2026). If you use it, please cite the paper below."
 title: "robustness: Range Tests for Equality and Equivalence Across Specifications (Stata)"
-version: "1.5.0"
-date-released: 2026-07-20
+version: "1.5.1"
+date-released: 2026-07-28
 authors:
   - family-names: Jaeger
     given-names: David A.
